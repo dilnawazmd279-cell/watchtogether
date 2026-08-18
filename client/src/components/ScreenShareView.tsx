@@ -71,9 +71,10 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
   const [playbackRate, setPlaybackRate] = useState(1.0);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  // Partner Playback & Audio states
+  // Partner Playback & Frame Diagnostics
   const [partnerPlayStatus, setPartnerPlayStatus] = useState<'IDLE' | 'PLAYING' | 'MUTED' | 'ERROR'>('IDLE');
   const [isPartnerAudioBlocked, setIsPartnerAudioBlocked] = useState(false);
+  const [hasRenderedFrame, setHasRenderedFrame] = useState(false);
 
   // Live Metrics for Diagnostics
   const [hostMetrics, setHostMetrics] = useState({
@@ -88,6 +89,16 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
     readyState: 0,
     paused: true,
   });
+
+  // Step 6: Verify Partner Video Mount / Unmount Lifecycle
+  useEffect(() => {
+    if (!isHost) {
+      console.log('[PARTNER VIDEO] MOUNT');
+      return () => {
+        console.log('[PARTNER VIDEO] UNMOUNT');
+      };
+    }
+  }, [isHost]);
 
   // Sync inputUrl with mediaSource if present
   useEffect(() => {
@@ -325,7 +336,7 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
   }, [onSetMediaSource, onStopStreaming]);
 
   // =========================================================================
-  // STEP 4, 5, 8 & 9: PARTNER REMOTE MOVIE PLAYBACK PIPELINE
+  // STEP 3, 4, 5, 8 & 9: PARTNER REMOTE MOVIE PLAYBACK & FRAME DIAGNOSTICS
   // =========================================================================
   useEffect(() => {
     const video = remoteMovieVideoRef.current;
@@ -346,27 +357,67 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
     console.log('srcObject:', remoteScreenStream ? 'attached' : 'missing');
 
     if (!hasVideoTracks || !remoteScreenStream) {
-      if (video.srcObject) {
-        video.srcObject = null;
-      }
       setPartnerPlayStatus('IDLE');
       setIsPartnerAudioBlocked(false);
       return;
     }
 
-    // Step 5: Assign remoteMovieStream directly to partnerMovieVideo
-    video.srcObject = remoteScreenStream;
+    // Step 7 & 8: Assign remoteMovieStream if not already assigned
+    if (video.srcObject !== remoteScreenStream) {
+      video.srcObject = remoteScreenStream;
+      console.log('[PARTNER MOVIE] srcObject assigned to remoteMovieStream');
+    }
+
     video.autoplay = true;
     video.playsInline = true;
     video.controls = false;
 
     let isMounted = true;
 
+    // Step 4: requestVideoFrameCallback frame render detection
+    if ('requestVideoFrameCallback' in video) {
+      let isChecking = true;
+      const checkFrame = () => {
+        if (!isChecking) return;
+        console.log('[PARTNER VIDEO] FRAME RENDERED');
+        if (isMounted) setHasRenderedFrame(true);
+        (video as any).requestVideoFrameCallback(checkFrame);
+      };
+      (video as any).requestVideoFrameCallback(checkFrame);
+    }
+
+    const logPartnerVideoState = (eventName: string) => {
+      console.log(`[PARTNER VIDEO] ${eventName}`);
+      console.log('[PARTNER VIDEO]');
+      console.log('readyState:', video.readyState);
+      console.log('networkState:', video.networkState);
+      console.log('paused:', video.paused);
+      console.log('currentTime:', video.currentTime);
+      console.log('duration:', video.duration);
+      console.log('videoWidth:', video.videoWidth);
+      console.log('videoHeight:', video.videoHeight);
+    };
+
+    // Step 5: Verify Partner Video DOM Visibility & Geometry
+    const logDomMetrics = () => {
+      const rect = video.getBoundingClientRect();
+      const computed = window.getComputedStyle(video);
+      console.log('[PARTNER VIDEO DOM]');
+      console.log('rect.width:', rect.width);
+      console.log('rect.height:', rect.height);
+      console.log('offsetWidth:', video.offsetWidth);
+      console.log('offsetHeight:', video.offsetHeight);
+      console.log('computed display:', computed.display);
+      console.log('computed visibility:', computed.visibility);
+      console.log('computed opacity:', computed.opacity);
+      console.log('computed zIndex:', computed.zIndex);
+      console.log('computed position:', computed.position);
+    };
+
     const attemptPartnerPlay = async () => {
       if (!isMounted || !video) return;
 
       try {
-        // Try unmuted play first
         video.muted = false;
         await video.play();
         console.log('[PARTNER MOVIE]');
@@ -375,6 +426,7 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
           setPartnerPlayStatus('PLAYING');
           setIsPartnerAudioBlocked(false);
         }
+        logDomMetrics();
       } catch (err: any) {
         console.warn('[PARTNER MOVIE] unmuted autoplay blocked, attempting muted playback:', err?.name);
         try {
@@ -387,6 +439,7 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
             setPartnerPlayStatus('MUTED');
             setIsPartnerAudioBlocked(true);
           }
+          logDomMetrics();
         } catch (mutedErr) {
           console.error('[PARTNER MOVIE]');
           console.error('play: FAILED', mutedErr);
@@ -398,12 +451,7 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
     };
 
     const onLoadedMetadata = () => {
-      console.log('[PARTNER MOVIE]');
-      console.log('videoWidth:', video.videoWidth);
-      console.log('[PARTNER MOVIE]');
-      console.log('videoHeight:', video.videoHeight);
-      console.log('[PARTNER MOVIE]');
-      console.log('readyState:', video.readyState);
+      logPartnerVideoState('loadedmetadata');
       setPartnerMetrics((prev) => ({
         ...prev,
         videoWidth: video.videoWidth,
@@ -412,6 +460,27 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
         paused: video.paused,
       }));
       attemptPartnerPlay();
+    };
+
+    const onLoadedData = () => logPartnerVideoState('loadeddata');
+    const onCanPlay = () => {
+      logPartnerVideoState('canplay');
+      attemptPartnerPlay();
+    };
+    const onPlaying = () => {
+      console.log('[PARTNER VIDEO] playing');
+      logDomMetrics();
+    };
+    const onResize = () => {
+      console.log(`[PARTNER VIDEO] resize: ${video.videoWidth} x ${video.videoHeight}`);
+      setPartnerMetrics((prev) => ({
+        ...prev,
+        videoWidth: video.videoWidth,
+        videoHeight: video.videoHeight,
+      }));
+    };
+    const onError = () => {
+      console.log('[PARTNER VIDEO] error:', video.error?.code, video.error?.message);
     };
 
     const onTimeUpdate = () => {
@@ -426,7 +495,11 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
     };
 
     video.addEventListener('loadedmetadata', onLoadedMetadata);
-    video.addEventListener('canplay', attemptPartnerPlay);
+    video.addEventListener('loadeddata', onLoadedData);
+    video.addEventListener('canplay', onCanPlay);
+    video.addEventListener('playing', onPlaying);
+    video.addEventListener('resize', onResize);
+    video.addEventListener('error', onError);
     video.addEventListener('timeupdate', onTimeUpdate);
 
     if (video.readyState >= 2) {
@@ -438,7 +511,11 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
     return () => {
       isMounted = false;
       video.removeEventListener('loadedmetadata', onLoadedMetadata);
-      video.removeEventListener('canplay', attemptPartnerPlay);
+      video.removeEventListener('loadeddata', onLoadedData);
+      video.removeEventListener('canplay', onCanPlay);
+      video.removeEventListener('playing', onPlaying);
+      video.removeEventListener('resize', onResize);
+      video.removeEventListener('error', onError);
       video.removeEventListener('timeupdate', onTimeUpdate);
     };
   }, [remoteScreenStream, isHost]);
@@ -521,7 +598,7 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
       )}
 
       {/* =========================================================================
-          STEP 6: MOVIE VIEWPORT: EXACTLY ONE VIDEO ELEMENT FOR ACTIVE VIEWER
+          STEP 6: MOVIE VIEWPORT: STABLE DOM ELEMENT FOR ACTIVE VIEWER
           ========================================================================= */}
       <div className="movie-viewport-stage">
         {isHost ? (
@@ -722,58 +799,54 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
           )
         ) : (
           /* ---------------------------------------------------------------------
-             PARTNER VIEW: REMOTE MOVIE ONLY (NO URL BAR, NO CONTROLS)
+             PARTNER VIEW: STABLE, PERMANENTLY MOUNTED MOVIE VIDEO IN DOM
              --------------------------------------------------------------------- */
-          hasPartnerReceivedMovie ? (
-            <div className="media-player-wrapper partner-cinema-wrapper">
-              {/* Step 6: Exactly ONE dedicated movie video element */}
-              <video
-                ref={remoteMovieVideoRef}
-                className="screen-video presentation-video"
-                autoPlay
-                playsInline
-                controls={false}
-                id="partner-movie-video"
-              />
+          <div className="media-player-wrapper partner-cinema-wrapper">
+            {/* Step 6 & 10: Exactly ONE permanent dedicated movie video element */}
+            <video
+              ref={remoteMovieVideoRef}
+              className={`screen-video presentation-video partner-debug-video ${hasPartnerReceivedMovie ? 'visible-movie' : 'hidden-movie'}`}
+              autoPlay
+              playsInline
+              controls={false}
+              id="partner-movie-video"
+            />
 
-              {/* Audio Enable Pill if browser restricted audio */}
-              {isPartnerAudioBlocked && (
-                <div className="partner-audio-notice-bar">
-                  <button
-                    onClick={handlePartnerEnableAudio}
-                    className="btn-enable-audio-pill"
-                    title="Enable movie sound"
-                    id="enable-movie-audio-btn"
-                  >
-                    <Volume2 size={15} />
-                    <span>ENABLE MOVIE AUDIO</span>
-                  </button>
+            {/* Step 7: Waiting state displayed while no video track exists */}
+            {!hasPartnerReceivedMovie && (
+              <div className="empty-stage-card">
+                <div className="empty-stage-marquee-icon">
+                  <Film size={34} className="marquee-film-icon" />
                 </div>
-              )}
-            </div>
-          ) : mediaSource?.type === 'webpage' && resolvedSource?.embedUrl ? (
-            /* Partner Shared Embed Player */
-            <div className="media-player-wrapper embed-player-wrapper">
-              <iframe
-                src={resolvedSource.embedUrl}
-                title={resolvedSource.title || 'Movie Embed'}
-                allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
-                allowFullScreen
-                className="screen-video embed-iframe"
-              />
-            </div>
-          ) : (
-            /* Step 7: Waiting state displayed until a real video track exists */
-            <div className="empty-stage-card">
-              <div className="empty-stage-marquee-icon">
-                <Film size={34} className="marquee-film-icon" />
+                <h2 className="empty-stage-title">Waiting for Host Movie...</h2>
+                <p className="empty-stage-desc">
+                  The Host controls the movie stream. As soon as the Host plays a movie, it will appear here in real time.
+                </p>
               </div>
-              <h2 className="empty-stage-title">Waiting for Host Movie...</h2>
-              <p className="empty-stage-desc">
-                The Host controls the movie stream. As soon as the Host plays a movie, it will appear here in real time.
-              </p>
+            )}
+
+            {/* Step 11: In-Viewport Debug Diagnostics */}
+            <div className="partner-viewport-debug-tag">
+              <span>
+                DEBUG | {partnerMetrics.videoWidth}x{partnerMetrics.videoHeight} | State:{partnerMetrics.readyState} | Time:{partnerMetrics.currentTime.toFixed(1)}s | FrameRendered:{hasRenderedFrame ? 'YES' : 'NO'} | Status:{partnerPlayStatus}
+              </span>
             </div>
-          )
+
+            {/* Audio Enable Pill if browser restricted audio */}
+            {isPartnerAudioBlocked && hasPartnerReceivedMovie && (
+              <div className="partner-audio-notice-bar">
+                <button
+                  onClick={handlePartnerEnableAudio}
+                  className="btn-enable-audio-pill"
+                  title="Enable movie sound"
+                  id="enable-movie-audio-btn"
+                >
+                  <Volume2 size={15} />
+                  <span>ENABLE MOVIE AUDIO</span>
+                </button>
+              </div>
+            )}
+          </div>
         )}
 
         {/* =========================================================================
@@ -874,6 +947,12 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
                     <div className="diag-item">
                       <span className="diag-label">Time:</span>
                       <span className="diag-value">{partnerMetrics.currentTime.toFixed(1)}s</span>
+                    </div>
+                    <div className="diag-item">
+                      <span className="diag-label">Frame Rendered:</span>
+                      <span className={`diag-value ${hasRenderedFrame ? 'text-ok' : 'text-warn'}`}>
+                        {hasRenderedFrame ? 'YES' : 'NO'}
+                      </span>
                     </div>
                   </>
                 )}

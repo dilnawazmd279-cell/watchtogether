@@ -817,6 +817,33 @@ html, body {
   background-color: #000000;
 }
 
+.partner-debug-video {
+  outline: 2px solid red;
+}
+
+.visible-movie {
+  display: block !important;
+}
+
+.hidden-movie {
+  display: none !important;
+}
+
+.partner-viewport-debug-tag {
+  position: absolute;
+  top: 12px;
+  left: 14px;
+  background: rgba(0, 0, 0, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #38bdf8;
+  font-family: monospace;
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  pointer-events: none;
+  z-index: 30;
+}
+
 /* HOST MOVIE CONTROL BAR */
 .host-movie-controls-bar {
   position: absolute;

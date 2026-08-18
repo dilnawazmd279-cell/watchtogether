@@ -484,6 +484,40 @@ export function useWebRTC({ roomId, onRoomFull, onError }: UseWebRTCOptions) {
           console.error('[HOST MOVIE PC] Error creating movie offer:', err);
         }
       }
+
+      // Step 1: Host WebRTC stats polling every ~2s
+      const hostStatsInterval = window.setInterval(async () => {
+        if (moviePc.connectionState === 'closed') {
+          clearInterval(hostStatsInterval);
+          return;
+        }
+        try {
+          const stats = await moviePc.getStats();
+          stats.forEach((report: any) => {
+            if (report.type === 'outbound-rtp' && report.kind === 'video') {
+              console.log('[HOST STATS]');
+              console.log('bytesSent:', report.bytesSent);
+              console.log('packetsSent:', report.packetsSent);
+              console.log('framesEncoded:', report.framesEncoded);
+              console.log('framesSent:', report.framesSent);
+              console.log('frameWidth:', report.frameWidth);
+              console.log('frameHeight:', report.frameHeight);
+              console.log('framesPerSecond:', report.framesPerSecond);
+              console.log('timestamp:', report.timestamp);
+            }
+          });
+
+          const vTrack = stream.getVideoTracks()[0];
+          if (vTrack) {
+            console.log('[HOST MOVIE TRACK]');
+            console.log('readyState:', vTrack.readyState);
+            console.log('enabled:', vTrack.enabled);
+            console.log('muted:', vTrack.muted);
+          }
+        } catch {
+          // ignore closed connection stats error
+        }
+      }, 2000);
     },
     [peerId]
   );
@@ -954,6 +988,33 @@ export function useWebRTC({ roomId, onRoomFull, onError }: UseWebRTCOptions) {
                 targetPeerId: msg.senderPeerId,
                 senderPeerId: peerId,
               });
+
+              // Step 2: Partner WebRTC stats polling every ~2s
+              const partnerStatsInterval = window.setInterval(async () => {
+                if (moviePc.connectionState === 'closed') {
+                  clearInterval(partnerStatsInterval);
+                  return;
+                }
+                try {
+                  const stats = await moviePc.getStats();
+                  stats.forEach((report: any) => {
+                    if (report.type === 'inbound-rtp' && report.kind === 'video') {
+                      console.log('[PARTNER STATS]');
+                      console.log('bytesReceived:', report.bytesReceived);
+                      console.log('packetsReceived:', report.packetsReceived);
+                      console.log('framesDecoded:', report.framesDecoded);
+                      console.log('framesReceived:', report.framesReceived);
+                      console.log('frameWidth:', report.frameWidth);
+                      console.log('frameHeight:', report.frameHeight);
+                      console.log('framesPerSecond:', report.framesPerSecond);
+                      console.log('jitter:', report.jitter);
+                      console.log('packetsLost:', report.packetsLost);
+                    }
+                  });
+                } catch {
+                  // ignore closed connection stats error
+                }
+              }, 2000);
             } catch (err) {
               console.error('[PARTNER MOVIE PC] Error creating movie answer:', err);
             }
