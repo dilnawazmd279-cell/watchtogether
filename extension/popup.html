@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>WatchTogether Cinema Companion</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      width: 290px;
+      margin: 0;
+      padding: 16px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background-color: #0b0f19;
+      color: #f1f5f9;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 14px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid #1e2638;
+    }
+    .logo-icon {
+      font-size: 16px;
+    }
+    .title {
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      color: #38bdf8;
+      text-transform: uppercase;
+    }
+    .section-label {
+      font-size: 11px;
+      color: #94a3b8;
+      margin-bottom: 4px;
+    }
+    .tab-title-box {
+      background-color: #141c2e;
+      border: 1px solid #23304a;
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #ffffff;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 12px;
+    }
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      margin-bottom: 14px;
+    }
+    .status-ready {
+      background-color: rgba(56, 189, 248, 0.15);
+      color: #38bdf8;
+      border: 1px solid rgba(56, 189, 248, 0.3);
+    }
+    .status-streaming {
+      background-color: rgba(16, 185, 129, 0.15);
+      color: #10b981;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+    .status-error {
+      background-color: rgba(239, 68, 68, 0.15);
+      color: #ef4444;
+      border: 1px solid rgba(239, 68, 68, 0.3);
+    }
+    .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+    }
+    .dot-ready {
+      background-color: #38bdf8;
+    }
+    .dot-streaming {
+      background-color: #10b981;
+      animation: pulse-glow 1.5s infinite;
+    }
+    .dot-error {
+      background-color: #ef4444;
+    }
+    @keyframes pulse-glow {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.85); }
+    }
+    .btn-start {
+      width: 100%;
+      padding: 10px 14px;
+      background: linear-gradient(135deg, #38bdf8, #818cf8);
+      color: #040d1a;
+      border: none;
+      border-radius: 8px;
+      font-weight: 700;
+      font-size: 13px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: all 0.15s ease;
+    }
+    .btn-start:hover {
+      opacity: 0.92;
+      transform: translateY(-1px);
+    }
+    .btn-start:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+      transform: none;
+    }
+    .btn-stop {
+      width: 100%;
+      padding: 10px 14px;
+      background-color: #ef4444;
+      color: #ffffff;
+      border: none;
+      border-radius: 8px;
+      font-weight: 700;
+      font-size: 13px;
+      cursor: pointer;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: all 0.15s ease;
+    }
+    .btn-stop:hover {
+      background-color: #dc2626;
+    }
+    .error-notice {
+      display: none;
+      font-size: 11px;
+      color: #f87171;
+      background-color: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.25);
+      border-radius: 6px;
+      padding: 8px;
+      margin-top: 10px;
+      line-height: 1.4;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <span class="logo-icon">🎬</span>
+    <div class="title">Watch Together Cinema</div>
+  </div>
+
+  <div class="section-label">Current tab:</div>
+  <div id="tab-title" class="tab-title-box">Loading tab info...</div>
+
+  <div id="status-badge" class="status-badge status-ready">
+    <div id="status-dot" class="dot dot-ready"></div>
+    <span id="status-text">Ready</span>
+  </div>
+
+  <button id="start-btn" class="btn-start">
+    <span>START CINEMA</span>
+  </button>
+
+  <button id="stop-btn" class="btn-stop">
+    <span>STOP CINEMA</span>
+  </button>
+
+  <div id="error-box" class="error-notice"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
