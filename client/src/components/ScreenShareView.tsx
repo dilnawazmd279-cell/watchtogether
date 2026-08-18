@@ -8,11 +8,10 @@ import {
   Film,
   Volume2,
   Activity,
-  ChevronDown,
-  ChevronUp,
   Tv,
-  Radio,
-  ExternalLink,
+  Plus,
+  Heart,
+  Sparkles,
 } from 'lucide-react';
 import { MediaSourceState } from '../types';
 import { loadMovieFromUrl, normalizeMediaUrl } from '../lib/mediaResolver';
@@ -34,7 +33,7 @@ interface ScreenShareViewProps {
   onSetMediaSource: (source: MediaSourceState | null) => void;
   onStartStreaming: (stream: MediaStream) => void;
   onStopStreaming: () => void;
-  onStartShare: () => void;
+  onStartShare?: () => void;
   partnerConnected: boolean;
   connState?: string;
   iceState?: string;
@@ -50,6 +49,7 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
   onSetMediaSource,
   onStartStreaming,
   onStopStreaming,
+  onStartShare: _onStartShare,
   partnerConnected,
   connState = 'unknown',
   iceState = 'unknown',
@@ -60,10 +60,16 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
   const remoteMovieVideoRef = useRef<HTMLVideoElement>(null);
   const localScreenVideoRef = useRef<HTMLVideoElement>(null);
 
+  // Modal & Input states
+  const [isAddMovieModalOpen, setIsAddMovieModalOpen] = useState(false);
+  const [modalTab, setModalTab] = useState<'link' | 'tab'>('link');
   const [inputUrl, setInputUrl] = useState('');
   const [urlError, setUrlError] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showDebugPanel, setShowDebugPanel] = useState(false);
+
+  // Cinema start announcement toast ("Lights down... Movie time ❤️")
+  const [cinemaToast, setCinemaToast] = useState<string | null>(null);
 
   // Extension status & Cinema Tab
   const [extensionInstalled, setExtensionInstalled] = useState(false);
@@ -106,7 +112,9 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
 
     const unsubStream = onExtensionStreamCaptured((stream) => {
       console.log('[ScreenShareView] Received tab stream from extension');
+      triggerCinemaToast();
       onStartStreaming(stream);
+      setIsAddMovieModalOpen(false);
     });
 
     return () => {
@@ -114,6 +122,14 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
       unsubStream();
     };
   }, [onStartStreaming]);
+
+  // Brief subtle toast when cinema starts
+  const triggerCinemaToast = () => {
+    setCinemaToast('Lights down... Movie time ❤️');
+    setTimeout(() => {
+      setCinemaToast(null);
+    }, 1800);
+  };
 
   // Sync inputUrl with mediaSource if input is empty
   useEffect(() => {
@@ -142,13 +158,12 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
         console.log(`[HOST MOVIE] captureStream tracks: video=${videoTracks.length} audio=${audioTracks.length}`);
 
         if (videoTracks.length > 0) {
+          triggerCinemaToast();
           onStartStreaming(stream);
         }
       } catch (err) {
         console.warn('[HOST MOVIE] captureStream error:', err);
       }
-    } else {
-      console.warn('[HOST MOVIE] captureStream not supported in this browser.');
     }
   }, [isHost, onStartStreaming]);
 
@@ -156,7 +171,6 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
     const video = hostVideoRef.current;
     if (!video) return;
 
-    console.log(`[HOST MOVIE] loadedmetadata: ${video.videoWidth} x ${video.videoHeight}`);
     setHostMetrics((prev) => ({
       ...prev,
       readyState: video.readyState,
@@ -179,7 +193,6 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
   };
 
   const handleHostPlaying = () => {
-    console.log('[HOST MOVIE] playing');
     handleCaptureHostVideo();
   };
 
@@ -200,11 +213,6 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
   const handleHostError = () => {
     const video = hostVideoRef.current;
     const error = video?.error;
-    console.error('[HOST MOVIE ERROR]', {
-      code: error?.code,
-      message: error?.message,
-      currentSrc: video?.currentSrc,
-    });
     if (error) {
       setUrlError(`Video could not be loaded (Error code ${error.code}). The source may block browser playback.`);
     }
@@ -242,10 +250,6 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
     video.srcObject = remoteScreenStream;
     console.log('[PARTNER MOVIE] srcObject attached');
 
-    const vTracks = remoteScreenStream.getVideoTracks();
-    const aTracks = remoteScreenStream.getAudioTracks();
-    console.log(`[PARTNER MOVIE] remote stream tracks: video=${vTracks.length} audio=${aTracks.length}`);
-
     video.autoplay = true;
     video.playsInline = true;
     video.controls = false;
@@ -260,7 +264,6 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
         video.muted = true;
         await video.play();
         console.log('[PARTNER MOVIE] PLAYING');
-        console.log(`[PARTNER MOVIE] video dimensions: ${video.videoWidth} x ${video.videoHeight}`);
 
         if (isSubscribed) {
           setPlayStatus('SUCCESS');
@@ -275,7 +278,6 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
           if (isSubscribed) setIsAudioBlocked(true);
         }
       } catch (err: any) {
-        console.error('[PARTNER MOVIE] autoplay failed', err);
         if (isSubscribed) {
           if (err?.name === 'NotAllowedError') {
             setPlayStatus('NOT_ALLOWED');
@@ -288,7 +290,6 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
     };
 
     const onLoadedMetadata = () => {
-      console.log(`[PARTNER MOVIE] video dimensions: ${video.videoWidth} x ${video.videoHeight}`);
       setPartnerMetrics((prev) => ({
         ...prev,
         readyState: video.readyState,
@@ -347,7 +348,6 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
     try {
       video.muted = false;
       await video.play();
-      console.log('[PARTNER MOVIE] PLAYING');
       setIsPlaybackBlocked(false);
       setIsAudioBlocked(false);
       setPlayStatus('SUCCESS');
@@ -356,13 +356,13 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
     }
   };
 
-  // Host: Open Movie (Opens tab in Chrome)
+  // Host: Open Movie (Determines direct MP4 vs Webpage Tab)
   const handleOpenUrl = useCallback(async () => {
     setUrlError(null);
     const raw = inputUrl.trim();
 
     if (!raw) {
-      setUrlError('Please enter a video or website URL.');
+      setUrlError('Please enter a movie link or webpage URL.');
       return;
     }
 
@@ -387,6 +387,8 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
           window.open(resolved.url, '_blank', 'noopener,noreferrer');
           setMovieTabOpened(true);
         }
+      } else if (resolved.type === 'direct-video') {
+        setIsAddMovieModalOpen(false);
       }
     } catch (err: any) {
       setUrlError(err?.message || 'Please enter a valid URL.');
@@ -399,8 +401,10 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
       setUrlError(null);
       setIsCapturingTab(true);
       const stream = await startDirectTabCapture();
+      triggerCinemaToast();
       onStartStreaming(stream);
       setIsCapturingTab(false);
+      setIsAddMovieModalOpen(false);
     } catch (err: any) {
       setIsCapturingTab(false);
       if (err?.name !== 'NotAllowedError') {
@@ -453,55 +457,11 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
 
   return (
     <div className="movie-section-container" ref={containerRef} id="screen-stage">
-      {/* =========================================================================
-          HOST-ONLY TOP: NORMALIZED URL INPUT BAR
-          ========================================================================= */}
-      {isHost && (
-        <div className="media-url-bar-container">
-          <form
-            className="media-url-form"
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleOpenUrl();
-            }}
-          >
-            <div className="media-url-input-wrap">
-              <LinkIcon size={15} className="url-input-icon" />
-              <input
-                type="text"
-                value={inputUrl}
-                onChange={(e) => {
-                  setInputUrl(e.target.value);
-                  if (urlError) setUrlError(null);
-                }}
-                placeholder="Host: Paste direct video (.mp4) or movie website URL..."
-                className="media-url-input"
-                id="movie-url-input"
-                autoComplete="off"
-              />
-              {mediaSource && (
-                <button
-                  type="button"
-                  onClick={handleClearMedia}
-                  className="url-clear-btn"
-                  title="Clear current video"
-                >
-                  <X size={14} />
-                </button>
-              )}
-            </div>
-            <button
-              type="submit"
-              disabled={!inputUrl.trim()}
-              className="btn-open-url"
-              id="movie-url-open-btn"
-            >
-              <Play size={13} />
-              <span>OPEN MOVIE</span>
-            </button>
-          </form>
-
-          {urlError && <div className="url-error-msg">{urlError}</div>}
+      {/* Toast Announcement when Cinema starts */}
+      {cinemaToast && (
+        <div className="cinema-toast-announcement">
+          <Sparkles size={16} className="toast-sparkle" />
+          <span>{cinemaToast}</span>
         </div>
       )}
 
@@ -511,7 +471,7 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
       <div className="movie-viewport-stage">
         {isHost ? (
           /* ---------------------------------------------------------------------
-             HOST VIEW: EXACTLY ONE MOVIE OR SCREEN SHARE OR WAITING CARD
+             HOST VIEW: EXACTLY ONE MOVIE OR ACTIVE STREAM OR CLEAN EMPTY STAGE
              --------------------------------------------------------------------- */
           mediaSource?.type === 'direct-video' ? (
             /* HOST DIRECT MP4: Native HTML5 Video */
@@ -526,26 +486,32 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
                 onLoadedMetadata={handleHostLoadedMetadata}
                 onCanPlay={handleHostCanPlay}
                 onPlaying={handleHostPlaying}
-                onPause={() => console.log('[HOST MOVIE] pause')}
-                onSeeking={() => console.log('[HOST MOVIE] seeking')}
-                onSeeked={() => console.log('[HOST MOVIE] seeked')}
                 onError={handleHostError}
                 onTimeUpdate={handleHostTimeUpdate}
                 className="screen-video direct-video-player"
                 id="host-movie-video"
               />
-            </div>
-          ) : isHostStreaming ? (
-            /* HOST ACTIVE TAB CINEMA / SCREEN SHARE (LIVE PREVIEW) */
-            <div className="media-player-wrapper">
-              <div className="screen-presenter-bar">
-                <div className="presenter-badge">
-                  <Radio size={14} className="live-pulse-icon" />
-                  <span>STREAMING TO PARTNER</span>
-                </div>
+              <div className="cinema-live-floating-badge">
+                <span className="live-dot"></span>
+                <span>Cinema Active • Streaming</span>
                 <button
                   onClick={handleClearMedia}
-                  className="btn-stop-share-pill"
+                  className="btn-badge-stop"
+                  title="Close movie"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            </div>
+          ) : isHostStreaming ? (
+            /* HOST ACTIVE TAB CINEMA (LIVE STREAM) */
+            <div className="media-player-wrapper">
+              <div className="cinema-live-floating-badge">
+                <span className="live-dot"></span>
+                <span>Cinema Active • Streaming to Partner</span>
+                <button
+                  onClick={handleClearMedia}
+                  className="btn-badge-stop"
                   title="Stop Cinema streaming"
                   id="stop-cinema-badge-btn"
                 >
@@ -561,75 +527,41 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
                 id="local-screen-video"
               />
             </div>
-          ) : mediaSource?.type === 'webpage' ? (
-            /* HOST WEBPAGE CINEMA READY CARD */
-            <div className="unsupported-site-card">
-              <div className="unsupported-icon-wrap">
-                <Film size={36} className="unsupported-icon" />
-              </div>
-              <h3 className="unsupported-title">
-                {movieTabOpened ? 'Movie Tab Ready' : 'Movie Website Detected'}
-              </h3>
-              <p className="unsupported-desc">
-                {movieTabOpened
-                  ? 'Switch to the movie tab in Chrome and click the WatchTogether extension icon in your toolbar, then click START CINEMA!'
-                  : `Open ${mediaSource.title} in a browser tab to stream it to your partner.`}
-              </p>
-
-              {/* Action Buttons */}
-              <div className="mode2-actions-group">
-                <button
-                  type="button"
-                  onClick={handleDirectTabCapture}
-                  disabled={isCapturingTab}
-                  className="btn-primary-stage"
-                  id="start-cinema-btn"
-                >
-                  <Tv size={18} />
-                  <span>{isCapturingTab ? 'Starting Cinema...' : '🎬 START CINEMA'}</span>
-                </button>
-
-                {movieTabOpened && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (mediaSource?.url) window.open(mediaSource.url, '_blank', 'noopener,noreferrer');
-                    }}
-                    className="btn-secondary-stage"
-                  >
-                    <ExternalLink size={15} />
-                    <span>Focus Movie Tab</span>
-                  </button>
-                )}
-              </div>
-            </div>
           ) : (
-            /* HOST COMPACT EMPTY STAGE */
+            /* HOST COMPACT ELEGANT EMPTY STAGE */
             <div className="empty-stage-card">
-              <div className="empty-stage-icon-wrap">
-                <Film size={44} className="empty-stage-icon" />
+              <div className="empty-stage-marquee-icon">
+                <Film size={36} className="marquee-film-icon" />
               </div>
-              <h2 className="empty-stage-title">Watch Together Cinema</h2>
+              <h2 className="empty-stage-title">What's on tonight?</h2>
               <p className="empty-stage-desc">
-                {partnerConnected
-                  ? 'Paste a movie URL or direct video at the top and click OPEN MOVIE.'
-                  : 'You are the Host. Waiting for your partner to join.'}
+                Add a movie when you're ready.
               </p>
               <div className="empty-stage-actions">
                 <button
-                  onClick={handleDirectTabCapture}
-                  className="btn-primary-stage"
-                  id="start-share-stage-btn"
+                  onClick={() => {
+                    setUrlError(null);
+                    setIsAddMovieModalOpen(true);
+                  }}
+                  className="btn-add-movie-primary"
+                  id="open-add-movie-modal-btn"
                 >
-                  <Tv size={18} />
-                  <span>Share Movie / Tab</span>
+                  <Plus size={16} />
+                  <span>Add Movie</span>
+                </button>
+                <button
+                  onClick={handleDirectTabCapture}
+                  className="btn-share-tab-link"
+                  id="share-tab-direct-btn"
+                >
+                  or share a browser tab
                 </button>
               </div>
             </div>
           )
         ) : (
           /* ---------------------------------------------------------------------
-             PARTNER VIEW: EXACTLY ONE REMOTE MOVIE VIDEO OR WAITING CARD
+             PARTNER VIEW: EXACTLY ONE REMOTE MOVIE VIDEO OR WAITING STAGE
              --------------------------------------------------------------------- */
           remoteScreenStream ? (
             <div className="media-player-wrapper partner-cinema-wrapper">
@@ -642,7 +574,7 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
                 id="partner-movie-video"
               />
 
-              {/* Unobtrusive Audio Enable Pill if browser restricted audio */}
+              {/* Audio Enable Pill if browser policy muted audio */}
               {isAudioBlocked && !isPlaybackBlocked && (
                 <div className="partner-audio-notice-bar">
                   <button
@@ -657,7 +589,7 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
                 </div>
               )}
 
-              {/* Playback Blocked Overlay if browser gesture blocked initial video */}
+              {/* Playback Blocked Overlay */}
               {isPlaybackBlocked && (
                 <div className="partner-playback-blocked-overlay">
                   <button
@@ -673,18 +605,18 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
             </div>
           ) : (
             <div className="empty-stage-card">
-              <div className="empty-stage-icon-wrap">
-                <Film size={44} className="empty-stage-icon" />
+              <div className="empty-stage-marquee-icon">
+                <Heart size={34} className="marquee-heart-icon" />
               </div>
-              <h2 className="empty-stage-title">Waiting for Host Movie</h2>
+              <h2 className="empty-stage-title">Waiting for your person...</h2>
               <p className="empty-stage-desc">
-                The Host controls the movie stream. As soon as the Host starts a movie, it will play here in real time.
+                Your partner will choose and start the movie. Sit back, talk, and enjoy!
               </p>
             </div>
           )
         )}
 
-        {/* Fullscreen Button */}
+        {/* Fullscreen Floating Button */}
         <button
           onClick={toggleFullscreen}
           className="stage-fullscreen-floating-btn"
@@ -694,18 +626,145 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
         </button>
 
         {/* =========================================================================
-            DEVELOPMENT DIAGNOSTICS PANEL (Collapsible)
+            "+ ADD MOVIE" MODAL (Host Only)
             ========================================================================= */}
-        <div className="cinema-diag-wrapper">
+        {isHost && isAddMovieModalOpen && (
+          <div className="modal-backdrop" onClick={() => setIsAddMovieModalOpen(false)}>
+            <div
+              className="modal-cinema-dialog"
+              onClick={(e) => e.stopPropagation()}
+              role="dialog"
+              aria-labelledby="modal-title"
+            >
+              <div className="modal-header">
+                <div className="modal-title-wrap">
+                  <Film size={18} className="modal-title-icon" />
+                  <h3 id="modal-title" className="modal-title">What are we watching?</h3>
+                </div>
+                <button
+                  onClick={() => setIsAddMovieModalOpen(false)}
+                  className="modal-close-btn"
+                  title="Close"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Modal Tabs */}
+              <div className="modal-tab-nav">
+                <button
+                  onClick={() => setModalTab('link')}
+                  className={`modal-tab-btn ${modalTab === 'link' ? 'active' : ''}`}
+                >
+                  <LinkIcon size={15} />
+                  <span>Movie Link</span>
+                </button>
+                <button
+                  onClick={() => setModalTab('tab')}
+                  className={`modal-tab-btn ${modalTab === 'tab' ? 'active' : ''}`}
+                >
+                  <Tv size={15} />
+                  <span>Browser Tab</span>
+                </button>
+              </div>
+
+              {/* Tab 1: Movie Link */}
+              {modalTab === 'link' && (
+                <div className="modal-tab-content">
+                  <p className="modal-instructions">
+                    Paste a direct video file (.mp4) or a movie player webpage link:
+                  </p>
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      handleOpenUrl();
+                    }}
+                    className="modal-url-form"
+                  >
+                    <div className="modal-input-wrap">
+                      <LinkIcon size={16} className="modal-input-icon" />
+                      <input
+                        type="text"
+                        value={inputUrl}
+                        onChange={(e) => {
+                          setInputUrl(e.target.value);
+                          if (urlError) setUrlError(null);
+                        }}
+                        placeholder="https://... (.mp4 or movie site link)"
+                        className="modal-text-input"
+                        autoFocus
+                      />
+                    </div>
+                    {urlError && <div className="modal-error-text">{urlError}</div>}
+
+                    {movieTabOpened && (
+                      <div className="modal-movie-tab-ready-box">
+                        <div className="ready-box-header">
+                          <Sparkles size={15} className="ready-sparkle" />
+                          <span>Movie Tab Ready</span>
+                        </div>
+                        <p className="ready-box-desc">
+                          Switch to the movie tab in Chrome, click the WatchTogether extension icon in your toolbar, and click <strong>START CINEMA</strong>!
+                        </p>
+                      </div>
+                    )}
+
+                    <div className="modal-action-row">
+                      <button
+                        type="submit"
+                        disabled={!inputUrl.trim()}
+                        className="btn-modal-primary"
+                      >
+                        <Play size={15} />
+                        <span>Open Movie</span>
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              )}
+
+              {/* Tab 2: Browser Tab */}
+              {modalTab === 'tab' && (
+                <div className="modal-tab-content">
+                  <p className="modal-instructions">
+                    Already have Netflix, YouTube, or your movie playing in another browser tab?
+                  </p>
+                  <div className="modal-tab-share-box">
+                    <div className="tab-share-icon-circle">
+                      <Tv size={26} />
+                    </div>
+                    <h4 className="tab-share-title">Stream Any Browser Tab</h4>
+                    <p className="tab-share-desc">
+                      Share the movie tab with crystal-clear video and synchronized tab audio.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleDirectTabCapture}
+                      disabled={isCapturingTab}
+                      className="btn-modal-primary"
+                    >
+                      <Tv size={16} />
+                      <span>{isCapturingTab ? 'Starting Cinema...' : '🎬 Start Cinema'}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* =========================================================================
+            DEVELOPMENT DIAGNOSTICS (DEV Toggle Only)
+            ========================================================================= */}
+        <div className="cinema-dev-pill-wrap">
           <button
             type="button"
             onClick={() => setShowDebugPanel((prev) => !prev)}
-            className="cinema-diag-toggle-btn"
-            title="Toggle Movie Stream Diagnostic Panel"
+            className="cinema-dev-pill-btn"
+            title="Toggle Developer Diagnostics"
           >
-            <Activity size={13} />
-            <span>DEBUG: {isHost ? 'HOST' : 'PARTNER'}</span>
-            {showDebugPanel ? <ChevronDown size={13} /> : <ChevronUp size={13} />}
+            <Activity size={11} />
+            <span>DEV</span>
           </button>
 
           {showDebugPanel && (
@@ -733,6 +792,12 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
                     <div className="diag-item full-width">
                       <span className="diag-label">URL:</span>
                       <span className="diag-value">{mediaSource?.url || 'none'}</span>
+                    </div>
+                    <div className="diag-item">
+                      <span className="diag-label">Partner:</span>
+                      <span className={`diag-value ${partnerConnected ? 'text-ok' : 'text-warn'}`}>
+                        {partnerConnected ? 'CONNECTED' : 'WAITING'}
+                      </span>
                     </div>
                     <div className="diag-item">
                       <span className="diag-label">Extension:</span>
@@ -772,22 +837,8 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
                       </span>
                     </div>
                     <div className="diag-item">
-                      <span className="diag-label">Partner play():</span>
-                      <span
-                        className={`diag-value ${
-                          playStatus === 'SUCCESS'
-                            ? 'text-ok'
-                            : playStatus === 'NOT_ALLOWED'
-                            ? 'text-warn'
-                            : 'text-muted'
-                        }`}
-                      >
-                        {playStatus}
-                      </span>
-                    </div>
-                    <div className="diag-item">
-                      <span className="diag-label">Partner time:</span>
-                      <span className="diag-value">{partnerMetrics.currentTime.toFixed(1)}s</span>
+                      <span className="diag-label">Play status:</span>
+                      <span className="diag-value">{playStatus}</span>
                     </div>
                     <div className="diag-item">
                       <span className="diag-label">Partner size:</span>

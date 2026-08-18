@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, MessageSquare } from 'lucide-react';
+import { Send, Heart, MessageCircle } from 'lucide-react';
 import { ChatMessage } from '../types';
 
 interface ChatProps {
@@ -43,18 +43,18 @@ export const Chat: React.FC<ChatProps> = ({
   };
 
   return (
-    <div className="sidebar-chat-panel" aria-label="Room chat">
+    <div className="sidebar-chat-panel" aria-label="Private conversation">
       <div className="sidebar-chat-header">
-        <MessageSquare size={16} className="chat-header-icon" />
-        <span className="chat-header-text">Party Chat</span>
+        <MessageCircle size={14} className="chat-header-icon" />
+        <span className="chat-header-text">Your Conversation</span>
       </div>
 
       <div className="sidebar-chat-messages">
         {messages.length === 0 ? (
           <div className="chat-empty-state">
-            <MessageSquare size={24} className="empty-chat-icon" />
+            <Heart size={20} className="empty-chat-heart" />
             <p>No messages yet.</p>
-            <span>Say hi to your watch partner!</span>
+            <span>Say something to your person...</span>
           </div>
         ) : (
           messages.map((msg) => {
@@ -93,7 +93,7 @@ export const Chat: React.FC<ChatProps> = ({
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={partnerConnected ? 'Type a message (Enter)...' : 'Waiting for partner...'}
+          placeholder={partnerConnected ? 'Say something...' : 'Waiting for your person...'}
           className="sidebar-chat-input"
           id="chat-message-input"
           autoComplete="off"
@@ -105,7 +105,7 @@ export const Chat: React.FC<ChatProps> = ({
           title="Send message"
           id="chat-send-btn"
         >
-          <Send size={15} />
+          <Send size={13} />
         </button>
       </form>
     </div>

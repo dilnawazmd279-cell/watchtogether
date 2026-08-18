@@ -4,7 +4,7 @@ import {
   MicOff,
   Video,
   VideoOff,
-  MonitorOff,
+  Tv,
   PhoneOff,
   Sparkles,
 } from 'lucide-react';
@@ -35,12 +35,12 @@ export const Controls: React.FC<ControlsProps> = ({
         <button
           onClick={onToggleMic}
           className={`control-btn ${mediaState.isMicOn ? 'btn-active' : 'btn-off'}`}
-          title={mediaState.isMicOn ? 'Mute Microphone' : 'Unmute Microphone'}
-          aria-label={mediaState.isMicOn ? 'Mute Microphone' : 'Unmute Microphone'}
+          title={mediaState.isMicOn ? 'Mute microphone' : 'Unmute microphone'}
+          aria-label={mediaState.isMicOn ? 'Mute microphone' : 'Unmute microphone'}
           id="toggle-mic-btn"
         >
           <div className="btn-icon-inner">
-            {mediaState.isMicOn ? <Mic size={18} /> : <MicOff size={18} />}
+            {mediaState.isMicOn ? <Mic size={17} /> : <MicOff size={17} />}
           </div>
           <span className="control-btn-label">{mediaState.isMicOn ? 'Mic On' : 'Mic Off'}</span>
         </button>
@@ -49,56 +49,60 @@ export const Controls: React.FC<ControlsProps> = ({
         <button
           onClick={onToggleCamera}
           className={`control-btn ${mediaState.isCameraOn ? 'btn-active' : 'btn-off'}`}
-          title={mediaState.isCameraOn ? 'Turn Camera Off' : 'Turn Camera On'}
-          aria-label={mediaState.isCameraOn ? 'Turn Camera Off' : 'Turn Camera On'}
+          title={mediaState.isCameraOn ? 'Turn camera off' : 'Turn camera on'}
+          aria-label={mediaState.isCameraOn ? 'Turn camera off' : 'Turn camera on'}
           id="toggle-camera-btn"
         >
           <div className="btn-icon-inner">
-            {mediaState.isCameraOn ? <Video size={18} /> : <VideoOff size={18} />}
+            {mediaState.isCameraOn ? <Video size={17} /> : <VideoOff size={17} />}
           </div>
           <span className="control-btn-label">
             {mediaState.isCameraOn ? 'Camera On' : 'Camera Off'}
           </span>
         </button>
 
-        {/* Host Stop Cinema Button (only visible when sharing) */}
-        {isHost && mediaState.isScreenSharing && (
+        {/* Host Cinema Control Button */}
+        {isHost && (
           <button
             onClick={onToggleScreenShare}
-            className="control-btn btn-danger"
-            title="Stop Cinema Streaming"
-            aria-label="Stop Cinema Streaming"
+            className={`control-btn ${
+              mediaState.isScreenSharing ? 'btn-cinema-active' : 'btn-cinema-neutral'
+            }`}
+            title={mediaState.isScreenSharing ? 'Stop Cinema' : 'Start Cinema'}
+            aria-label={mediaState.isScreenSharing ? 'Stop Cinema' : 'Start Cinema'}
             id="toggle-screenshare-btn"
           >
             <div className="btn-icon-inner">
-              <MonitorOff size={18} />
+              <Tv size={17} />
             </div>
-            <span className="control-btn-label">Stop Cinema</span>
+            <span className="control-btn-label">
+              {mediaState.isScreenSharing ? 'Stop Cinema' : 'Start Cinema'}
+            </span>
           </button>
         )}
 
-        {/* Leave Room */}
+        {/* Leave Cinema */}
         <button
           onClick={onLeaveRoom}
-          className="control-btn btn-danger"
-          title="Leave Room"
-          aria-label="Leave Room"
+          className="control-btn btn-leave"
+          title="Leave Cinema"
+          aria-label="Leave Cinema"
           id="leave-room-btn"
         >
           <div className="btn-icon-inner">
-            <PhoneOff size={18} />
+            <PhoneOff size={17} />
           </div>
-          <span className="control-btn-label">Leave</span>
+          <span className="control-btn-label">Leave Cinema</span>
         </button>
       </div>
 
-      {/* Right side Tip */}
+      {/* Right side Subtle Tip */}
       <div className="controls-tip-wrap">
         <Sparkles size={14} className="controls-tip-icon" />
         <span className="controls-tip-text">
           {isHost
-            ? 'Open your movie in Chrome, switch to the movie tab, and click the WatchTogether icon.'
-            : 'You are watching with your host. Chat, react, and enjoy!'}
+            ? 'Add a movie or start Cinema anytime.'
+            : 'Private cinema for two. Relax and enjoy together ❤️'}
         </span>
       </div>
     </div>

@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from 'react';
-import { Mic, MicOff, Video, VideoOff, User } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, Heart, User } from 'lucide-react';
 
 interface PartnerCam1Props {
   remoteCameraStream: MediaStream | null;
@@ -40,7 +40,7 @@ export const PartnerCam1: React.FC<PartnerCam1Props> = ({
 
   return (
     <div className="sidebar-camera-card" id="partner-cam-1">
-      {/* Remote Audio Track Player (Always present and unmuted for voice audio) */}
+      {/* Remote Audio Track Player */}
       <audio ref={remoteAudioRef} autoPlay id="remote-audio-player" />
 
       <div className="sidebar-video-wrapper">
@@ -49,16 +49,16 @@ export const PartnerCam1: React.FC<PartnerCam1Props> = ({
           className={`sidebar-video-el ${remoteHasCamera && remoteCameraStream ? 'visible' : 'hidden'}`}
           autoPlay
           playsInline
-          muted // Muted to let remoteAudioRef handle audio cleanly without double-playback
+          muted
           id="remote-camera-video"
         />
         {(!remoteHasCamera || !remoteCameraStream) && (
           <div className="sidebar-avatar-fallback">
-            <div className="avatar-circle remote-avatar">
-              <User size={26} />
+            <div className={`avatar-circle remote-avatar ${!partnerConnected ? 'waiting-pulse' : ''}`}>
+              {partnerConnected ? <User size={24} /> : <Heart size={22} className="avatar-heart" />}
             </div>
             <span className="avatar-label">
-              {partnerConnected ? 'Camera Off' : 'Waiting for Partner...'}
+              {partnerConnected ? 'Camera off' : 'Waiting for your person...'}
             </span>
           </div>
         )}
@@ -66,27 +66,25 @@ export const PartnerCam1: React.FC<PartnerCam1Props> = ({
 
       <div className="sidebar-cam-footer">
         <div className="cam-user-tag">
-          <span className="user-badge partner-badge">
-            {partnerConnected ? 'Partner' : 'Partner (Waiting)'}
-          </span>
+          <span className="user-badge partner-badge">Partner</span>
         </div>
         {partnerConnected && (
           <div className="cam-status-icons">
             {remoteHasMic ? (
-              <span className="status-mini-icon mic-active" title="Partner Mic Active">
+              <span className="status-mini-icon mic-active" title="Partner mic active">
                 <Mic size={13} />
               </span>
             ) : (
-              <span className="status-mini-icon mic-muted" title="Partner Mic Muted">
+              <span className="status-mini-icon mic-muted" title="Partner mic muted">
                 <MicOff size={13} />
               </span>
             )}
             {remoteHasCamera ? (
-              <span className="status-mini-icon video-active" title="Partner Camera Active">
+              <span className="status-mini-icon video-active" title="Partner camera active">
                 <Video size={13} />
               </span>
             ) : (
-              <span className="status-mini-icon video-muted" title="Partner Camera Off">
+              <span className="status-mini-icon video-muted" title="Partner camera off">
                 <VideoOff size={13} />
               </span>
             )}
@@ -134,15 +132,15 @@ export const PartnerCam2: React.FC<PartnerCam2Props> = ({
           className={`sidebar-video-el ${isCameraOn ? 'visible' : 'hidden'}`}
           autoPlay
           playsInline
-          muted // ALWAYS mute local camera/mic to prevent audio feedback loop
+          muted
           id="local-camera-video"
         />
         {!isCameraOn && (
           <div className="sidebar-avatar-fallback">
             <div className="avatar-circle local-avatar">
-              <User size={26} />
+              <User size={24} />
             </div>
-            <span className="avatar-label">Camera Off</span>
+            <span className="avatar-label">Camera off</span>
           </div>
         )}
       </div>
@@ -153,20 +151,20 @@ export const PartnerCam2: React.FC<PartnerCam2Props> = ({
         </div>
         <div className="cam-status-icons">
           {isMicOn ? (
-            <span className="status-mini-icon mic-active" title="Your Mic Active">
+            <span className="status-mini-icon mic-active" title="Your mic active">
               <Mic size={13} />
             </span>
           ) : (
-            <span className="status-mini-icon mic-muted" title="Your Mic Muted">
+            <span className="status-mini-icon mic-muted" title="Your mic muted">
               <MicOff size={13} />
             </span>
           )}
           {isCameraOn ? (
-            <span className="status-mini-icon video-active" title="Your Camera Active">
+            <span className="status-mini-icon video-active" title="Your camera active">
               <Video size={13} />
             </span>
           ) : (
-            <span className="status-mini-icon video-muted" title="Your Camera Off">
+            <span className="status-mini-icon video-muted" title="Your camera off">
               <VideoOff size={13} />
             </span>
           )}

@@ -47,7 +47,7 @@ export const App: React.FC = () => {
     onRoomFull: handleRoomFull,
   });
 
-  // Step 9: Lifecycle logs for Host vs Partner
+  // Lifecycle logs
   useEffect(() => {
     if (activeRoomId) {
       if (isHost) {
@@ -109,66 +109,48 @@ export const App: React.FC = () => {
   }
 
   return (
-    <div className="app-main-container">
+    <div className="room-shell">
       {/* Error notification banner */}
       <ErrorBanner message={errorMessage} onDismiss={clearError} />
 
-      <div className="app-two-column-layout">
-        {/* =========================================================================
-            LEFT COLUMN (2/3 width) - RoomHeader, Movie Stage, Media Controls Dock
-            ========================================================================= */}
-        <div className="layout-left-column">
-          {/* Top Section: Room Header */}
-          <div className="left-header-section">
-            <RoomHeader
-              roomId={activeRoomId}
-              connectionStatus={connectionStatus}
-              onLeave={handleLeaveRoom}
-            />
-          </div>
+      {/* 1. FULL-WIDTH ROOM HEADER */}
+      <header className="room-header-container">
+        <RoomHeader
+          roomId={activeRoomId}
+          connectionStatus={connectionStatus}
+          onLeave={handleLeaveRoom}
+        />
+      </header>
 
-          {/* Middle Section: Large Presentation Movie Area */}
-          <main className="left-movie-section" role="region" aria-label="Cinema Stage">
-            <ScreenShareView
-              isHost={isHost}
-              remoteScreenStream={remoteScreenStream}
-              localScreenStream={localScreenStream}
-              localIsScreenSharing={mediaState.isScreenSharing}
-              mediaSource={mediaSource}
-              onSetMediaSource={setMediaSource}
-              onStartStreaming={startStreamingMedia}
-              onStopStreaming={stopStreamingMedia}
-              onStartShare={startScreenShare}
-              partnerConnected={partnerConnected}
-              connState={connState}
-              iceState={iceState}
-              signalingState={signalingState}
-            />
-          </main>
+      {/* 2. MAIN 2-COLUMN ROOM BODY */}
+      <div className="room-layout">
+        {/* MOVIE COLUMN (NATURAL LEFT ~75%) */}
+        <main className="movie-column" role="region" aria-label="Cinema Stage">
+          <ScreenShareView
+            isHost={isHost}
+            remoteScreenStream={remoteScreenStream}
+            localScreenStream={localScreenStream}
+            localIsScreenSharing={mediaState.isScreenSharing}
+            mediaSource={mediaSource}
+            onSetMediaSource={setMediaSource}
+            onStartStreaming={startStreamingMedia}
+            onStopStreaming={stopStreamingMedia}
+            onStartShare={startScreenShare}
+            partnerConnected={partnerConnected}
+            connState={connState}
+            iceState={iceState}
+            signalingState={signalingState}
+          />
+        </main>
 
-          {/* Bottom Section: Media Controls Dock */}
-          <footer className="left-bottom-section">
-            <Controls
-              isHost={isHost}
-              mediaState={mediaState}
-              onToggleCamera={toggleCamera}
-              onToggleMic={toggleMic}
-              onToggleScreenShare={toggleScreenShare}
-              onLeaveRoom={handleLeaveRoom}
-            />
-          </footer>
-        </div>
-
-        {/* =========================================================================
-            RIGHT COLUMN (1/3 width sidebar) - Camera Slots & Party Chat
-            ========================================================================= */}
+        {/* SIDEBAR (NATURAL RIGHT ~25%): 2 LARGE CAMERAS + COMPACT CHAT */}
         <aside
-          className="layout-right-column"
+          className="room-sidebar"
           role="complementary"
-          aria-label="Participant media and chat sidebar"
+          aria-label="Participant cameras and conversation"
         >
-          {/* SLOT 1: PARTNER CAMERA (Dominant top slot) */}
-          <div className="right-camera-slot">
+          {/* CAMERA 1: PARTNER (LARGE 16:9) */}
+          <div className="sidebar-cam-slot">
             <PartnerCam1
               remoteCameraStream={remoteCameraStream}
               remoteHasCamera={remoteHasCamera}
@@ -177,8 +159,8 @@ export const App: React.FC = () => {
             />
           </div>
 
-          {/* SLOT 2: LOCAL USER CAMERA (Middle slot) */}
-          <div className="right-camera-slot">
+          {/* CAMERA 2: YOU (LARGE 16:9) */}
+          <div className="sidebar-cam-slot">
             <PartnerCam2
               localCameraStream={localCameraStream}
               isCameraOn={mediaState.isCameraOn}
@@ -186,8 +168,8 @@ export const App: React.FC = () => {
             />
           </div>
 
-          {/* SLOT 3: CHAT (Remaining height) */}
-          <div className="right-chat-slot">
+          {/* COMPACT CHAT (REMAINING HEIGHT) */}
+          <div className="sidebar-chat-slot">
             <Chat
               messages={messages}
               onSendMessage={sendMessage}
@@ -196,6 +178,18 @@ export const App: React.FC = () => {
           </div>
         </aside>
       </div>
+
+      {/* 3. FULL-WIDTH BOTTOM CONTROLS */}
+      <footer className="room-controls-container">
+        <Controls
+          isHost={isHost}
+          mediaState={mediaState}
+          onToggleCamera={toggleCamera}
+          onToggleMic={toggleMic}
+          onToggleScreenShare={toggleScreenShare}
+          onLeaveRoom={handleLeaveRoom}
+        />
+      </footer>
     </div>
   );
 };

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Copy, Check, Film } from 'lucide-react';
+import { Copy, Check, Heart } from 'lucide-react';
 import { ConnectionStatus } from '../types';
 import { buildRoomInviteUrl } from '../lib/urlHelper';
 
@@ -21,7 +21,6 @@ export const RoomHeader: React.FC<RoomHeaderProps> = ({
       if (navigator.clipboard && navigator.clipboard.writeText) {
         await navigator.clipboard.writeText(url);
       } else {
-        // Fallback for non-https / older browsers
         const input = document.createElement('input');
         input.value = url;
         document.body.appendChild(input);
@@ -40,32 +39,28 @@ export const RoomHeader: React.FC<RoomHeaderProps> = ({
     switch (connectionStatus) {
       case 'connected':
         return {
-          text: 'Partner Connected (2/2)',
+          text: 'Together now',
           className: 'status-badge status-connected',
         };
       case 'waiting-partner':
         return {
-          text: 'Waiting for Partner (1/2)',
+          text: 'Waiting for your person...',
           className: 'status-badge status-waiting',
         };
       case 'connecting-peer':
-        return {
-          text: 'Connecting WebRTC...',
-          className: 'status-badge status-connecting',
-        };
       case 'connecting-server':
         return {
-          text: 'Connecting Server...',
+          text: 'Connecting...',
           className: 'status-badge status-connecting',
         };
       case 'partner-disconnected':
         return {
-          text: 'Partner Left (1/2)',
+          text: 'Partner stepped away',
           className: 'status-badge status-disconnected',
         };
       case 'room-full':
         return {
-          text: 'Room Full (Max 2)',
+          text: 'Cinema Full',
           className: 'status-badge status-error',
         };
       case 'error':
@@ -75,7 +70,7 @@ export const RoomHeader: React.FC<RoomHeaderProps> = ({
         };
       default:
         return {
-          text: 'Initializing...',
+          text: 'Private Cinema',
           className: 'status-badge status-connecting',
         };
     }
@@ -85,16 +80,18 @@ export const RoomHeader: React.FC<RoomHeaderProps> = ({
 
   return (
     <header className="app-header">
+      {/* Brand Left */}
       <div className="header-brand">
         <div className="brand-icon-wrapper">
-          <Film size={20} className="brand-icon" />
+          <Heart size={18} className="brand-heart-icon" fill="currentColor" />
         </div>
         <div className="brand-text">
           <span className="brand-title">WATCH TOGETHER</span>
-          <span className="brand-tag">P2P CINEMA</span>
+          <span className="brand-tag">PRIVATE CINEMA</span>
         </div>
       </div>
 
+      {/* Center Status */}
       <div className="header-center">
         <div className={status.className}>
           <span className="status-dot"></span>
@@ -102,19 +99,20 @@ export const RoomHeader: React.FC<RoomHeaderProps> = ({
         </div>
       </div>
 
+      {/* Actions Right */}
       <div className="header-actions">
-        <div className="room-id-pill" title="Room Code">
-          <span className="room-id-label">ROOM:</span>
+        <div className="room-id-pill" title="Cinema Code">
+          <span className="room-id-label">CODE:</span>
           <code className="room-id-code">{roomId}</code>
         </div>
         <button
           onClick={copyRoomLink}
           className={`btn-copy-link ${copied ? 'copied' : ''}`}
-          title="Copy room invite link"
+          title="Copy private cinema invite link"
           id="copy-room-link-btn"
         >
-          {copied ? <Check size={16} /> : <Copy size={16} />}
-          <span>{copied ? 'Link Copied!' : 'Copy Link'}</span>
+          {copied ? <Check size={15} /> : <Copy size={15} />}
+          <span>{copied ? 'Copied' : 'Copy Invite'}</span>
         </button>
       </div>
     </header>
