@@ -85,6 +85,8 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
     videoWidth: 0,
     videoHeight: 0,
     currentTime: 0,
+    readyState: 0,
+    paused: true,
   });
 
   // Sync inputUrl with mediaSource if present
@@ -101,13 +103,18 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
   }, [mediaSource?.url]);
 
   // =========================================================================
-  // HOST: CAPTURESTREAM & MOVIE STREAMING PIPELINE (DIRECT MEDIA)
+  // STEP 1 & 10: HOST CAPTURESTREAM & MOVIE STREAMING PIPELINE
   // =========================================================================
   const captureAndStreamHostVideo = useCallback(() => {
     const video = hostVideoRef.current;
     if (!video || !isHost) return;
 
-    console.log(`[HOST MOVIE] video dimensions: ${video.videoWidth} x ${video.videoHeight}`);
+    console.log('[HOST MOVIE]');
+    console.log('source URL:', mediaSource?.url);
+    console.log('[HOST MOVIE]');
+    console.log('videoWidth:', video.videoWidth);
+    console.log('[HOST MOVIE]');
+    console.log('videoHeight:', video.videoHeight);
 
     const captureFn = (video as any).captureStream || (video as any).mozCaptureStream;
     if (typeof captureFn === 'function') {
@@ -116,7 +123,10 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
         const videoTracks = stream.getVideoTracks();
         const audioTracks = stream.getAudioTracks();
 
-        console.log(`[HOST MOVIE] captureStream tracks: video=${videoTracks.length} audio=${audioTracks.length}`);
+        console.log('[HOST MOVIE]');
+        console.log('captureStream video tracks:', videoTracks.length);
+        console.log('[HOST MOVIE]');
+        console.log('captureStream audio tracks:', audioTracks.length);
 
         if (videoTracks.length > 0) {
           onStartStreaming(stream);
@@ -127,7 +137,7 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
     } else {
       setUrlNotice('Your browser does not support video stream capture. Please use Chrome, Edge, or Firefox.');
     }
-  }, [isHost, onStartStreaming]);
+  }, [isHost, mediaSource?.url, onStartStreaming]);
 
   // Host Video Event Handlers
   const handleHostLoadedMetadata = () => {
@@ -315,16 +325,28 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
   }, [onSetMediaSource, onStopStreaming]);
 
   // =========================================================================
-  // PARTNER: REMOTE MOVIE PLAYBACK PIPELINE
+  // STEP 4, 5, 8 & 9: PARTNER REMOTE MOVIE PLAYBACK PIPELINE
   // =========================================================================
   useEffect(() => {
     const video = remoteMovieVideoRef.current;
     if (!video || isHost) return;
 
-    if (!remoteScreenStream) {
+    const hasVideoTracks = remoteScreenStream && remoteScreenStream.getVideoTracks().length > 0;
+    const hasAudioTracks = remoteScreenStream && remoteScreenStream.getAudioTracks().length > 0;
+
+    console.log('[PARTNER MOVIE]');
+    console.log('video track received:', hasVideoTracks ? 'YES' : 'NO');
+    console.log('[PARTNER MOVIE]');
+    console.log('audio track received:', hasAudioTracks ? 'YES' : 'NO');
+    console.log('[PARTNER MOVIE]');
+    console.log(
+      `remoteMovieStream tracks: video=${remoteScreenStream?.getVideoTracks().length || 0} audio=${remoteScreenStream?.getAudioTracks().length || 0}`
+    );
+    console.log('[PARTNER MOVIE]');
+    console.log('srcObject:', remoteScreenStream ? 'attached' : 'missing');
+
+    if (!hasVideoTracks || !remoteScreenStream) {
       if (video.srcObject) {
-        const oldStream = video.srcObject as MediaStream;
-        oldStream.getTracks().forEach((track) => track.stop());
         video.srcObject = null;
       }
       setPartnerPlayStatus('IDLE');
@@ -332,48 +354,64 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
       return;
     }
 
+    // Step 5: Assign remoteMovieStream directly to partnerMovieVideo
     video.srcObject = remoteScreenStream;
-    console.log('[PARTNER MOVIE] srcObject attached');
-
     video.autoplay = true;
     video.playsInline = true;
     video.controls = false;
 
     let isMounted = true;
 
-    const playRemoteStream = async () => {
-      if (!isMounted) return;
-      try {
-        video.muted = true;
-        await video.play();
-        console.log('[PARTNER MOVIE] PLAYING');
+    const attemptPartnerPlay = async () => {
+      if (!isMounted || !video) return;
 
+      try {
+        // Try unmuted play first
+        video.muted = false;
+        await video.play();
+        console.log('[PARTNER MOVIE]');
+        console.log('play: SUCCESS');
         if (isMounted) {
           setPartnerPlayStatus('PLAYING');
-        }
-
-        try {
-          video.muted = false;
-          if (isMounted) setIsPartnerAudioBlocked(false);
-        } catch {
-          video.muted = true;
-          if (isMounted) setIsPartnerAudioBlocked(true);
+          setIsPartnerAudioBlocked(false);
         }
       } catch (err: any) {
-        console.warn('[PARTNER MOVIE] Autoplay notice:', err);
-        if (isMounted) {
-          setPartnerPlayStatus('ERROR');
+        console.warn('[PARTNER MOVIE] unmuted autoplay blocked, attempting muted playback:', err?.name);
+        try {
+          // Step 8: Fallback to muted playback if autoplay policy blocks sound
+          video.muted = true;
+          await video.play();
+          console.log('[PARTNER MOVIE]');
+          console.log('play: SUCCESS (muted)');
+          if (isMounted) {
+            setPartnerPlayStatus('MUTED');
+            setIsPartnerAudioBlocked(true);
+          }
+        } catch (mutedErr) {
+          console.error('[PARTNER MOVIE]');
+          console.error('play: FAILED', mutedErr);
+          if (isMounted) {
+            setPartnerPlayStatus('ERROR');
+          }
         }
       }
     };
 
     const onLoadedMetadata = () => {
+      console.log('[PARTNER MOVIE]');
+      console.log('videoWidth:', video.videoWidth);
+      console.log('[PARTNER MOVIE]');
+      console.log('videoHeight:', video.videoHeight);
+      console.log('[PARTNER MOVIE]');
+      console.log('readyState:', video.readyState);
       setPartnerMetrics((prev) => ({
         ...prev,
         videoWidth: video.videoWidth,
         videoHeight: video.videoHeight,
+        readyState: video.readyState,
+        paused: video.paused,
       }));
-      playRemoteStream();
+      attemptPartnerPlay();
     };
 
     const onTimeUpdate = () => {
@@ -382,21 +420,25 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
         currentTime: video.currentTime,
         videoWidth: video.videoWidth,
         videoHeight: video.videoHeight,
+        readyState: video.readyState,
+        paused: video.paused,
       }));
     };
 
     video.addEventListener('loadedmetadata', onLoadedMetadata);
-    video.addEventListener('canplay', playRemoteStream);
+    video.addEventListener('canplay', attemptPartnerPlay);
     video.addEventListener('timeupdate', onTimeUpdate);
 
     if (video.readyState >= 2) {
       onLoadedMetadata();
+    } else {
+      attemptPartnerPlay();
     }
 
     return () => {
       isMounted = false;
       video.removeEventListener('loadedmetadata', onLoadedMetadata);
-      video.removeEventListener('canplay', playRemoteStream);
+      video.removeEventListener('canplay', attemptPartnerPlay);
       video.removeEventListener('timeupdate', onTimeUpdate);
     };
   }, [remoteScreenStream, isHost]);
@@ -419,6 +461,9 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
   const remoteAudioTrack = remoteScreenStream?.getAudioTracks()[0] || null;
   const isDirectMediaActive = mediaSource?.type === 'direct-video' || resolvedSource?.sourceType === 'direct-media';
   const isEmbeddableActive = !isDirectMediaActive && mediaSource && resolvedSource?.sourceType === 'embeddable-page';
+
+  // Step 7: Partner waiting state strictly depends on remoteMovieStream having real video tracks
+  const hasPartnerReceivedMovie = !isHost && remoteScreenStream && remoteScreenStream.getVideoTracks().length > 0;
 
   return (
     <div className="movie-section-container" ref={containerRef} id="screen-stage">
@@ -476,7 +521,7 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
       )}
 
       {/* =========================================================================
-          MOVIE VIEWPORT: EXACTLY ONE VIEWPORT FOR ACTIVE VIEWER
+          STEP 6: MOVIE VIEWPORT: EXACTLY ONE VIDEO ELEMENT FOR ACTIVE VIEWER
           ========================================================================= */}
       <div className="movie-viewport-stage">
         {isHost ? (
@@ -679,8 +724,9 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
           /* ---------------------------------------------------------------------
              PARTNER VIEW: REMOTE MOVIE ONLY (NO URL BAR, NO CONTROLS)
              --------------------------------------------------------------------- */
-          remoteScreenStream ? (
+          hasPartnerReceivedMovie ? (
             <div className="media-player-wrapper partner-cinema-wrapper">
+              {/* Step 6: Exactly ONE dedicated movie video element */}
               <video
                 ref={remoteMovieVideoRef}
                 className="screen-video presentation-video"
@@ -717,6 +763,7 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
               />
             </div>
           ) : (
+            /* Step 7: Waiting state displayed until a real video track exists */
             <div className="empty-stage-card">
               <div className="empty-stage-marquee-icon">
                 <Film size={34} className="marquee-film-icon" />
@@ -791,19 +838,19 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
                     <div className="diag-item">
                       <span className="diag-label">Remote video:</span>
                       <span className={`diag-value ${remoteVideoTrack ? 'text-ok' : 'text-warn'}`}>
-                        {remoteVideoTrack ? 'RECEIVED' : 'NOT RECEIVED'}
+                        {remoteVideoTrack ? 'YES' : 'NO'}
                       </span>
                     </div>
                     <div className="diag-item">
                       <span className="diag-label">Remote audio:</span>
                       <span className={`diag-value ${remoteAudioTrack ? 'text-ok' : 'text-muted'}`}>
-                        {remoteAudioTrack ? 'RECEIVED' : 'NOT RECEIVED'}
+                        {remoteAudioTrack ? 'YES' : 'NO'}
                       </span>
                     </div>
                     <div className="diag-item">
                       <span className="diag-label">srcObject:</span>
-                      <span className={`diag-value ${remoteScreenStream ? 'text-ok' : 'text-warn'}`}>
-                        {remoteScreenStream ? 'MediaStream' : 'missing'}
+                      <span className={`diag-value ${remoteScreenStream ? 'attached' : 'missing'}`}>
+                        {remoteScreenStream ? 'attached' : 'missing'}
                       </span>
                     </div>
                     <div className="diag-item">
@@ -815,6 +862,18 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
                       <span className="diag-value">
                         {partnerMetrics.videoWidth}x{partnerMetrics.videoHeight}
                       </span>
+                    </div>
+                    <div className="diag-item">
+                      <span className="diag-label">ReadyState:</span>
+                      <span className="diag-value">{partnerMetrics.readyState}</span>
+                    </div>
+                    <div className="diag-item">
+                      <span className="diag-label">Paused:</span>
+                      <span className="diag-value">{partnerMetrics.paused ? 'YES' : 'NO'}</span>
+                    </div>
+                    <div className="diag-item">
+                      <span className="diag-label">Time:</span>
+                      <span className="diag-value">{partnerMetrics.currentTime.toFixed(1)}s</span>
                     </div>
                   </>
                 )}

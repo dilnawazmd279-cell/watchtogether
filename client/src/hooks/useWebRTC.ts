@@ -409,9 +409,12 @@ export function useWebRTC({ roomId, onRoomFull, onError }: UseWebRTCOptions) {
       const videoTracks = stream.getVideoTracks();
       const audioTracks = stream.getAudioTracks();
 
-      console.log('[HOST MOVIE] captureStream created');
-      console.log('[HOST MOVIE] video tracks =', videoTracks.length);
-      console.log('[HOST MOVIE] audio tracks =', audioTracks.length);
+      console.log('[HOST MOVIE]');
+      console.log('captureStream created');
+      console.log('[HOST MOVIE]');
+      console.log('video tracks:', videoTracks.length);
+      console.log('[HOST MOVIE]');
+      console.log('audio tracks:', audioTracks.length);
 
       setLocalScreenStream(stream);
       localScreenStreamRef.current = stream;
@@ -427,15 +430,17 @@ export function useWebRTC({ roomId, onRoomFull, onError }: UseWebRTCOptions) {
       const moviePc = new RTCPeerConnection(ICE_CONFIG);
       moviePcRef.current = moviePc;
 
-      // Add movie tracks
+      // Add movie tracks & log senders
       videoTracks.forEach((track) => {
-        moviePc.addTrack(track, stream);
-        console.log('[HOST MOVIE PC] sender video =', track.id);
+        const sender = moviePc.addTrack(track, stream);
+        console.log('[HOST MOVIE PC]');
+        console.log('video sender track:', sender.track?.id || track.id);
       });
 
       audioTracks.forEach((track) => {
-        moviePc.addTrack(track, stream);
-        console.log('[HOST MOVIE PC] sender audio =', track.id);
+        const sender = moviePc.addTrack(track, stream);
+        console.log('[HOST MOVIE PC]');
+        console.log('audio sender track:', sender.track?.id || track.id);
       });
 
       // Handle ICE candidates for Movie PC
@@ -451,7 +456,14 @@ export function useWebRTC({ roomId, onRoomFull, onError }: UseWebRTCOptions) {
       };
 
       moviePc.onconnectionstatechange = () => {
-        console.log('[HOST MOVIE PC] connectionState =', moviePc.connectionState);
+        console.log('[HOST MOVIE PC]');
+        console.log('movie PC connection:', moviePc.connectionState);
+        console.log('iceConnectionState:', moviePc.iceConnectionState);
+        console.log('signalingState:', moviePc.signalingState);
+      };
+
+      moviePc.oniceconnectionstatechange = () => {
+        console.log('[HOST MOVIE PC] iceConnectionState:', moviePc.iceConnectionState);
       };
 
       // Create movie offer and send to Partner
@@ -475,6 +487,8 @@ export function useWebRTC({ roomId, onRoomFull, onError }: UseWebRTCOptions) {
     },
     [peerId]
   );
+  const startStreamingMediaRef = useRef(startStreamingMedia);
+  startStreamingMediaRef.current = startStreamingMedia;
 
   // Stop Streaming Movie Media
   const stopStreamingMedia = useCallback(async () => {
@@ -756,6 +770,12 @@ export function useWebRTC({ roomId, onRoomFull, onError }: UseWebRTCOptions) {
             } catch (offerErr) {
               console.error('[WEBRTC] Error creating/sending camera offer:', offerErr);
             }
+
+            // If Host already has an active movie stream, send movie offer immediately to partner
+            if (localScreenStreamRef.current && localScreenStreamRef.current.getTracks().length > 0) {
+              console.log('[HOST WEBRTC] Partner joined while movie is active. Sending movie offer...');
+              startStreamingMediaRef.current(localScreenStreamRef.current);
+            }
             break;
           }
 
@@ -863,28 +883,44 @@ export function useWebRTC({ roomId, onRoomFull, onError }: UseWebRTCOptions) {
             const moviePc = new RTCPeerConnection(ICE_CONFIG);
             moviePcRef.current = moviePc;
 
+            // Dedicated remote movie stream
             const remoteMovieStream = new MediaStream();
 
             moviePc.onconnectionstatechange = () => {
               console.log('[PARTNER MOVIE PC] connectionState:', moviePc.connectionState);
+              console.log('[PARTNER MOVIE PC] iceConnectionState:', moviePc.iceConnectionState);
+              console.log('[PARTNER MOVIE PC] signalingState:', moviePc.signalingState);
+            };
+
+            moviePc.oniceconnectionstatechange = () => {
+              console.log('[PARTNER MOVIE PC] iceConnectionState:', moviePc.iceConnectionState);
             };
 
             moviePc.ontrack = (event) => {
-              console.log('[PARTNER MOVIE PC] TRACK RECEIVED:', event.track.kind, event.track.id);
+              console.log('[PARTNER MOVIE] TRACK RECEIVED', event.track.kind, event.track.id);
+
               if (event.track.kind === 'video') {
-                console.log('[PARTNER MOVIE] received video track');
-                console.log('[PARTNER MOVIE] ontrack video');
+                console.log('[PARTNER MOVIE] video track received: YES');
               } else if (event.track.kind === 'audio') {
-                console.log('[PARTNER MOVIE] received audio track');
-                console.log('[PARTNER MOVIE] ontrack audio');
+                console.log('[PARTNER MOVIE] audio track received: YES');
               }
 
-              remoteMovieStream.addTrack(event.track);
-              setRemoteScreenStream(remoteMovieStream);
-              remoteScreenStreamRef.current = remoteMovieStream;
+              // Step 5: Do NOT wait for event.streams[0] - add event.track directly
+              const existingTracks = remoteMovieStream.getTracks();
+              if (!existingTracks.some((t) => t.id === event.track.id)) {
+                remoteMovieStream.addTrack(event.track);
+              }
+
+              console.log(
+                `[PARTNER MOVIE] remoteMovieStream tracks: video=${remoteMovieStream.getVideoTracks().length} audio=${remoteMovieStream.getAudioTracks().length}`
+              );
+
+              // Update React state with a new MediaStream instance so reference change triggers React re-render
+              const newStreamRef = new MediaStream(remoteMovieStream.getTracks());
+              remoteScreenStreamRef.current = newStreamRef;
+              setRemoteScreenStream(newStreamRef);
               setRemoteIsScreenSharing(true);
               remoteIsScreenSharingRef.current = true;
-              console.log('[PARTNER MOVIE] remote stream created');
             };
 
             moviePc.onicecandidate = (event) => {
