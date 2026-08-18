@@ -1,11 +1,21 @@
 import { MediaSourceState } from '../types';
 
+export type MovieSourceType = 'direct-media' | 'supported-embed' | 'unsupported-webpage';
+
+export interface ResolvedMovieSource {
+  url: string;
+  sourceType: MovieSourceType;
+  title: string;
+  isControllable: boolean;
+  message?: string;
+}
+
 /**
  * Normalizes user-entered media URLs.
  * - Fixes duplicated protocols (e.g. https://https://example.com -> https://example.com)
  * - Prepends https:// only if no protocol exists
  * - Trims accidental whitespace
- * - Preserves query parameters and hashes
+ * - Preserves query parameters, hashes, and signed tokens
  * - Validates format with new URL()
  */
 export function normalizeMediaUrl(input: string): string {
@@ -37,7 +47,7 @@ export function normalizeMediaUrl(input: string): string {
 
 /**
  * Checks whether a URL points to a direct browser-playable media resource.
- * Handles query parameters and hashes (e.g. video.mp4?token=123#t=10).
+ * Handles query parameters, hashes, and signed tokens (.mp4, .webm, .ogg, .m4v).
  */
 export function isDirectMediaUrl(url: string): boolean {
   if (!url || typeof url !== 'string') return false;
@@ -47,7 +57,7 @@ export function isDirectMediaUrl(url: string): boolean {
     const pathname = parsed.pathname.toLowerCase();
 
     return (
-      /\.(mp4|webm|ogg|m4v|ogv|m3u8)($|\?|#)/i.test(pathname) ||
+      /\.(mp4|webm|ogg|m4v|ogv)($|\?|#)/i.test(pathname) ||
       /\.(mp4|webm|ogg|m4v)($|\?|#)/i.test(parsed.href)
     );
   } catch {
@@ -56,33 +66,47 @@ export function isDirectMediaUrl(url: string): boolean {
 }
 
 /**
- * Single media URL router.
- * - Direct media files (.mp4, .webm, .ogg, .m4v) -> 'direct-video'
- * - Arbitrary website pages (netflix, net27, streaming sites) -> 'webpage'
+ * Smart URL Router.
+ * Classifies a URL as:
+ * A. DIRECT MEDIA: (.mp4, .webm, .ogg, .m4v, direct video files)
+ * B. SUPPORTED EMBED: (specialized embed players)
+ * C. UNSUPPORTED WEBPAGE: (protected/arbitrary websites that cannot be directly controlled inside HTML5 video)
  */
-export function loadMovieFromUrl(input: string): MediaSourceState {
+export function resolveMovieSource(input: string): ResolvedMovieSource {
   const normalized = normalizeMediaUrl(input);
   const parsed = new URL(normalized);
   const pathname = parsed.pathname.toLowerCase();
 
-  // TYPE 1: Direct media files
+  // A. DIRECT MEDIA
   if (isDirectMediaUrl(normalized)) {
     const filename = pathname.split('/').filter(Boolean).pop() || 'Direct Video';
     return {
       url: normalized,
-      type: 'direct-video',
-      title: filename.split('?')[0],
-      currentTime: 0,
-      isPlaying: false,
-      updatedAt: Date.now(),
+      sourceType: 'direct-media',
+      title: decodeURIComponent(filename.split('?')[0]),
+      isControllable: true,
     };
   }
 
-  // TYPE 2: Arbitrary website / Movie player webpage
+  // C. UNSUPPORTED WEBPAGE
   return {
     url: normalized,
-    type: 'webpage',
+    sourceType: 'unsupported-webpage',
     title: parsed.hostname.replace(/^www\./i, ''),
+    isControllable: false,
+    message: "That movie site can't be controlled directly here. Try a direct video link (.mp4) or a supported player.",
+  };
+}
+
+/**
+ * Compatibility adapter for MediaSourceState
+ */
+export function loadMovieFromUrl(input: string): MediaSourceState {
+  const resolved = resolveMovieSource(input);
+  return {
+    url: resolved.url,
+    type: resolved.sourceType === 'direct-media' ? 'direct-video' : 'webpage',
+    title: resolved.title,
     currentTime: 0,
     isPlaying: false,
     updatedAt: Date.now(),

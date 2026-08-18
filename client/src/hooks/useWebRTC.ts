@@ -160,6 +160,8 @@ export function useWebRTC({ roomId, onRoomFull, onError }: UseWebRTCOptions) {
             text: data.text,
             timestamp: data.timestamp || Date.now(),
           });
+        } else if (data.type === 'movie-control') {
+          console.log('[MOVIE CONTROL] Received action:', data.action, 'time:', data.currentTime);
         }
       } catch (e) {
         console.error('[CHAT] Error parsing DataChannel message:', e);
@@ -1018,6 +1020,37 @@ export function useWebRTC({ roomId, onRoomFull, onError }: UseWebRTCOptions) {
     };
   }, [roomId, peerId]);
 
+  const sendMovieControl = useCallback((action: 'play' | 'pause' | 'seek', currentTime: number) => {
+    const payload = {
+      type: 'movie-control',
+      action,
+      currentTime,
+      timestamp: Date.now(),
+    };
+
+    if (dataChannelRef.current && dataChannelRef.current.readyState === 'open') {
+      try {
+        dataChannelRef.current.send(JSON.stringify(payload));
+      } catch (err) {
+        console.warn('[MOVIE CONTROL] DataChannel send error:', err);
+      }
+    }
+
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && partnerPeerIdRef.current) {
+      try {
+        wsRef.current.send(JSON.stringify({
+          type: 'signal',
+          roomId,
+          senderPeerId: peerId,
+          targetPeerId: partnerPeerIdRef.current,
+          data: payload,
+        }));
+      } catch (err) {
+        console.warn('[MOVIE CONTROL] WebSocket signal error:', err);
+      }
+    }
+  }, [roomId, peerId]);
+
   return {
     connectionStatus,
     peerId,
@@ -1046,6 +1079,7 @@ export function useWebRTC({ roomId, onRoomFull, onError }: UseWebRTCOptions) {
     startScreenShare,
     stopScreenShare: stopStreamingMedia,
     sendMessage,
+    sendMovieControl,
     leaveRoom,
     clearError: () => setErrorMessage(null),
   };

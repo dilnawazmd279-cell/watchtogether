@@ -40,6 +40,7 @@ export const App: React.FC = () => {
     toggleScreenShare,
     startScreenShare,
     sendMessage,
+    sendMovieControl,
     leaveRoom: hookLeaveRoom,
     clearError,
   } = useWebRTC({
@@ -136,6 +137,7 @@ export const App: React.FC = () => {
             onStartStreaming={startStreamingMedia}
             onStopStreaming={stopStreamingMedia}
             onStartShare={startScreenShare}
+            onSendMovieControl={sendMovieControl}
             partnerConnected={partnerConnected}
             connState={connState}
             iceState={iceState}
