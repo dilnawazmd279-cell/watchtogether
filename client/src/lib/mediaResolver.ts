@@ -1,13 +1,14 @@
 import { MediaSourceState } from '../types';
 
-export type MovieSourceType = 'direct-media' | 'supported-embed' | 'unsupported-webpage';
+export type MovieSourceType = 'direct-media' | 'embeddable-page' | 'blocked-webpage';
 
 export interface ResolvedMovieSource {
   url: string;
+  embedUrl?: string;
   sourceType: MovieSourceType;
   title: string;
   isControllable: boolean;
-  message?: string;
+  platform?: 'youtube' | 'vimeo' | 'twitch' | 'dailymotion' | 'generic';
 }
 
 /**
@@ -66,11 +67,68 @@ export function isDirectMediaUrl(url: string): boolean {
 }
 
 /**
+ * Converts known media platforms to their official embed URLs.
+ */
+export function convertToEmbedUrl(url: string): { embedUrl: string; platform: 'youtube' | 'vimeo' | 'twitch' | 'dailymotion' | 'generic' } {
+  try {
+    const parsed = new URL(url);
+    const hostname = parsed.hostname.toLowerCase().replace(/^www\./i, '');
+
+    // 1. YouTube
+    if (hostname === 'youtube.com' || hostname === 'm.youtube.com') {
+      const v = parsed.searchParams.get('v');
+      if (v) {
+        return { embedUrl: `https://www.youtube.com/embed/${v}?autoplay=1&enablejsapi=1`, platform: 'youtube' };
+      }
+      if (parsed.pathname.startsWith('/embed/')) {
+        return { embedUrl: url, platform: 'youtube' };
+      }
+      if (parsed.pathname.startsWith('/shorts/')) {
+        const shortId = parsed.pathname.split('/shorts/')[1]?.split('/')[0];
+        if (shortId) {
+          return { embedUrl: `https://www.youtube.com/embed/${shortId}?autoplay=1`, platform: 'youtube' };
+        }
+      }
+    } else if (hostname === 'youtu.be') {
+      const videoId = parsed.pathname.replace(/^\//, '').split('/')[0];
+      if (videoId) {
+        return { embedUrl: `https://www.youtube.com/embed/${videoId}?autoplay=1&enablejsapi=1`, platform: 'youtube' };
+      }
+    }
+
+    // 2. Vimeo
+    if (hostname === 'vimeo.com') {
+      const vimeoId = parsed.pathname.replace(/^\//, '').split('/')[0];
+      if (vimeoId && /^\d+$/.test(vimeoId)) {
+        return { embedUrl: `https://player.vimeo.com/video/${vimeoId}?autoplay=1`, platform: 'vimeo' };
+      }
+    } else if (hostname === 'player.vimeo.com') {
+      return { embedUrl: url, platform: 'vimeo' };
+    }
+
+    // 3. Dailymotion
+    if (hostname === 'dailymotion.com') {
+      const parts = parsed.pathname.split('/video/');
+      if (parts[1]) {
+        const videoId = parts[1].split('?')[0];
+        return { embedUrl: `https://www.dailymotion.com/embed/video/${videoId}`, platform: 'dailymotion' };
+      }
+    }
+
+    // 4. Generic Webpage Embedding
+    return { embedUrl: url, platform: 'generic' };
+  } catch {
+    return { embedUrl: url, platform: 'generic' };
+  }
+}
+
+/**
  * Smart URL Router.
- * Classifies a URL as:
- * A. DIRECT MEDIA: (.mp4, .webm, .ogg, .m4v, direct video files)
- * B. SUPPORTED EMBED: (specialized embed players)
- * C. UNSUPPORTED WEBPAGE: (protected/arbitrary websites that cannot be directly controlled inside HTML5 video)
+ * Step 1: Normalize and validate URL.
+ * Step 2: Determine source type:
+ *   A. DIRECT MEDIA (.mp4, .webm, .ogg, .m4v, direct video files)
+ *   B. EMBEDDABLE WEBPAGE (YouTube, Vimeo, or legitimate embed attempts)
+ *   C. BLOCKED WEBPAGE (Graceful fallback when embedding is prohibited)
  */
 export function resolveMovieSource(input: string): ResolvedMovieSource {
   const normalized = normalizeMediaUrl(input);
@@ -88,13 +146,15 @@ export function resolveMovieSource(input: string): ResolvedMovieSource {
     };
   }
 
-  // C. UNSUPPORTED WEBPAGE
+  // B. EMBEDDABLE WEBPAGE
+  const { embedUrl, platform } = convertToEmbedUrl(normalized);
   return {
     url: normalized,
-    sourceType: 'unsupported-webpage',
+    embedUrl,
+    sourceType: 'embeddable-page',
     title: parsed.hostname.replace(/^www\./i, ''),
     isControllable: false,
-    message: "That movie site can't be controlled directly here. Try a direct video link (.mp4) or a supported player.",
+    platform,
   };
 }
 

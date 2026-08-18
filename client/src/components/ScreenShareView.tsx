@@ -15,7 +15,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { MediaSourceState } from '../types';
-import { resolveMovieSource, normalizeMediaUrl } from '../lib/mediaResolver';
+import { resolveMovieSource, normalizeMediaUrl, ResolvedMovieSource } from '../lib/mediaResolver';
 
 interface ScreenShareViewProps {
   isHost: boolean;
@@ -58,10 +58,11 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
   // Single URL Input State
   const [inputUrl, setInputUrl] = useState('');
   const [urlNotice, setUrlNotice] = useState<string | null>(null);
-  const [unsupportedMessage, setUnsupportedMessage] = useState<string | null>(null);
+  const [resolvedSource, setResolvedSource] = useState<ResolvedMovieSource | null>(null);
+  const [isEmbedBlocked, setIsEmbedBlocked] = useState(false);
   const [showDebugPanel, setShowDebugPanel] = useState(false);
 
-  // Host Video Playback States
+  // Host Video Playback States (Direct Media Only)
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [volume, setVolume] = useState(1.0);
@@ -90,11 +91,17 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
   useEffect(() => {
     if (mediaSource?.url && !inputUrl) {
       setInputUrl(mediaSource.url);
+      try {
+        const resolved = resolveMovieSource(mediaSource.url);
+        setResolvedSource(resolved);
+      } catch {
+        // Ignore parsing errors on sync
+      }
     }
   }, [mediaSource?.url]);
 
   // =========================================================================
-  // HOST: CAPTURESTREAM & MOVIE STREAMING PIPELINE
+  // HOST: CAPTURESTREAM & MOVIE STREAMING PIPELINE (DIRECT MEDIA)
   // =========================================================================
   const captureAndStreamHostVideo = useCallback(() => {
     const video = hostVideoRef.current;
@@ -266,11 +273,11 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
   };
 
   // =========================================================================
-  // SINGLE URL OPEN HANDLER (RESOLVE MOVIE SOURCE)
+  // SINGLE URL OPEN HANDLER (SMART ROUTER)
   // =========================================================================
   const handleOpenMovie = useCallback(() => {
     setUrlNotice(null);
-    setUnsupportedMessage(null);
+    setIsEmbedBlocked(false);
     const raw = inputUrl.trim();
 
     if (!raw) {
@@ -281,23 +288,17 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
     try {
       const normalized = normalizeMediaUrl(raw);
       const resolved = resolveMovieSource(normalized);
+      setResolvedSource(resolved);
 
-      if (resolved.sourceType === 'direct-media') {
-        onSetMediaSource({
-          url: resolved.url,
-          type: 'direct-video',
-          title: resolved.title,
-          currentTime: 0,
-          isPlaying: false,
-          updatedAt: Date.now(),
-        });
-        setInputUrl(resolved.url);
-      } else {
-        // Unsupported webpage
-        setUnsupportedMessage(
-          "That movie site can't be controlled directly here. Try a direct video link (.mp4) or a supported media stream."
-        );
-      }
+      onSetMediaSource({
+        url: resolved.url,
+        type: resolved.sourceType === 'direct-media' ? 'direct-video' : 'webpage',
+        title: resolved.title,
+        currentTime: 0,
+        isPlaying: false,
+        updatedAt: Date.now(),
+      });
+      setInputUrl(resolved.url);
     } catch (err: any) {
       setUrlNotice(err?.message || 'Please enter a valid URL.');
     }
@@ -305,9 +306,10 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
 
   const handleClearMovie = useCallback(() => {
     onSetMediaSource(null);
+    setResolvedSource(null);
     setInputUrl('');
     setUrlNotice(null);
-    setUnsupportedMessage(null);
+    setIsEmbedBlocked(false);
     setIsPlaying(false);
     onStopStreaming();
   }, [onSetMediaSource, onStopStreaming]);
@@ -415,6 +417,8 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
 
   const remoteVideoTrack = remoteScreenStream?.getVideoTracks()[0] || null;
   const remoteAudioTrack = remoteScreenStream?.getAudioTracks()[0] || null;
+  const isDirectMediaActive = mediaSource?.type === 'direct-video' || resolvedSource?.sourceType === 'direct-media';
+  const isEmbeddableActive = !isDirectMediaActive && mediaSource && resolvedSource?.sourceType === 'embeddable-page';
 
   return (
     <div className="movie-section-container" ref={containerRef} id="screen-stage">
@@ -438,9 +442,9 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
                 onChange={(e) => {
                   setInputUrl(e.target.value);
                   if (urlNotice) setUrlNotice(null);
-                  if (unsupportedMessage) setUnsupportedMessage(null);
+                  if (isEmbedBlocked) setIsEmbedBlocked(false);
                 }}
-                placeholder="Paste direct movie link (e.g. .mp4, .webm)..."
+                placeholder="Paste movie link (.mp4, YouTube, or web link)..."
                 className="media-url-input"
                 id="movie-url-input"
                 autoComplete="off"
@@ -472,18 +476,37 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
       )}
 
       {/* =========================================================================
-          MOVIE VIEWPORT: EXACTLY ONE VIDEO ELEMENT FOR ACTIVE VIEWER
+          MOVIE VIEWPORT: EXACTLY ONE VIEWPORT FOR ACTIVE VIEWER
           ========================================================================= */}
       <div className="movie-viewport-stage">
         {isHost ? (
           /* ---------------------------------------------------------------------
-             HOST VIEW: LOCAL PLAYER WITH FULL CONTROLS OR CLEAN EMPTY STAGE
+             HOST VIEW: DIRECT VIDEO / EMBED IFRAME / BLOCKED NOTICE / EMPTY STAGE
              --------------------------------------------------------------------- */
-          mediaSource?.type === 'direct-video' ? (
+          isEmbedBlocked ? (
+            /* BLOCKED WEBPAGE FALLBACK */
+            <div className="unsupported-site-card">
+              <div className="unsupported-icon-wrap">
+                <AlertCircle size={34} className="unsupported-icon" />
+              </div>
+              <h3 className="unsupported-title">This site doesn't allow in-app playback.</h3>
+              <p className="unsupported-desc">
+                Try a direct video link or a supported player.
+              </p>
+              <button
+                type="button"
+                onClick={handleClearMovie}
+                className="btn-primary-stage"
+              >
+                <span>Try Another Link</span>
+              </button>
+            </div>
+          ) : isDirectMediaActive ? (
+            /* A. DIRECT MEDIA: NATIVE HTML5 VIDEO WITH HOST CONTROLS */
             <div className="media-player-wrapper host-cinema-wrapper">
               <video
                 ref={hostVideoRef}
-                src={mediaSource.url}
+                src={mediaSource?.url}
                 crossOrigin="anonymous"
                 playsInline
                 preload="metadata"
@@ -499,7 +522,7 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
                 onClick={togglePlayPause}
               />
 
-              {/* HOST CUSTOM MOVIE CONTROL BAR */}
+              {/* HOST MOVIE CONTROL BAR (DIRECT MEDIA ONLY) */}
               <div className="host-movie-controls-bar" role="toolbar" aria-label="Movie controls">
                 {/* Seek Progress Bar */}
                 <div className="movie-seek-container">
@@ -520,14 +543,14 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
                 {/* Control Action Buttons */}
                 <div className="movie-controls-actions">
                   <div className="controls-left-group">
-                    {/* Back 10s */}
+                    {/* -10s Back */}
                     <button
                       type="button"
                       onClick={skipBackward10}
                       className="btn-movie-ctrl"
                       title="Rewind 10 seconds"
                     >
-                      <RotateCcw size={16} />
+                      <RotateCcw size={15} />
                       <span className="btn-ctrl-sub">10</span>
                     </button>
 
@@ -538,17 +561,17 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
                       className="btn-movie-ctrl btn-play-pause"
                       title={isPlaying ? 'Pause' : 'Play'}
                     >
-                      {isPlaying ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" />}
+                      {isPlaying ? <Pause size={17} fill="currentColor" /> : <Play size={17} fill="currentColor" />}
                     </button>
 
-                    {/* Forward 10s */}
+                    {/* +10s Forward */}
                     <button
                       type="button"
                       onClick={skipForward10}
                       className="btn-movie-ctrl"
                       title="Skip forward 10 seconds"
                     >
-                      <RotateCw size={16} />
+                      <RotateCw size={15} />
                       <span className="btn-ctrl-sub">10</span>
                     </button>
 
@@ -560,7 +583,7 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
                         className="btn-movie-ctrl"
                         title={isMuted ? 'Unmute' : 'Mute'}
                       >
-                        {isMuted || volume === 0 ? <VolumeX size={17} /> : <Volume2 size={17} />}
+                        {isMuted || volume === 0 ? <VolumeX size={16} /> : <Volume2 size={16} />}
                       </button>
                       <input
                         type="range"
@@ -597,10 +620,35 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
                       className="btn-movie-ctrl"
                       title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
                     >
-                      {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+                      {isFullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
                     </button>
                   </div>
                 </div>
+              </div>
+            </div>
+          ) : isEmbeddableActive && resolvedSource?.embedUrl ? (
+            /* B. EMBEDDABLE WEBPAGE: LEGITIMATE IFRAME PLAYER */
+            <div className="media-player-wrapper embed-player-wrapper">
+              <iframe
+                src={resolvedSource.embedUrl}
+                title={resolvedSource.title || 'Movie Embed'}
+                allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+                allowFullScreen
+                className="screen-video embed-iframe"
+                onError={() => setIsEmbedBlocked(true)}
+              />
+
+              {/* Discreet Floating Bar with Fallback Option */}
+              <div className="embed-floating-notice-bar">
+                <span className="embed-title-text">{resolvedSource.title}</span>
+                <button
+                  type="button"
+                  onClick={() => setIsEmbedBlocked(true)}
+                  className="btn-report-blocked"
+                  title="If this video does not load, click here"
+                >
+                  Can't see the video?
+                </button>
               </div>
             </div>
           ) : localScreenStream ? (
@@ -615,24 +663,6 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
                 id="local-screen-video"
               />
             </div>
-          ) : unsupportedMessage ? (
-            /* UNSUPPORTED WEBPAGE NOTICE */
-            <div className="unsupported-site-card">
-              <div className="unsupported-icon-wrap">
-                <AlertCircle size={36} className="unsupported-icon" />
-              </div>
-              <h3 className="unsupported-title">That movie site can't be controlled directly here.</h3>
-              <p className="unsupported-desc">
-                Try a direct video link (.mp4, .webm) or a supported media stream.
-              </p>
-              <button
-                type="button"
-                onClick={() => setUnsupportedMessage(null)}
-                className="btn-primary-stage"
-              >
-                <span>Try Another Link</span>
-              </button>
-            </div>
           ) : (
             /* HOST COMPACT ELEGANT EMPTY CINEMA STAGE */
             <div className="empty-stage-card">
@@ -641,7 +671,7 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
               </div>
               <h2 className="empty-stage-title">What's on tonight?</h2>
               <p className="empty-stage-desc">
-                Add a movie when you're ready. Paste a direct playable video link (.mp4) above.
+                Add a movie when you're ready. Paste a direct video link (.mp4) or supported player above.
               </p>
             </div>
           )
@@ -674,6 +704,17 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
                   </button>
                 </div>
               )}
+            </div>
+          ) : mediaSource?.type === 'webpage' && resolvedSource?.embedUrl ? (
+            /* Partner Shared Embed Player */
+            <div className="media-player-wrapper embed-player-wrapper">
+              <iframe
+                src={resolvedSource.embedUrl}
+                title={resolvedSource.title || 'Movie Embed'}
+                allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+                allowFullScreen
+                className="screen-video embed-iframe"
+              />
             </div>
           ) : (
             <div className="empty-stage-card">
@@ -708,6 +749,10 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
                 <div className="diag-item">
                   <span className="diag-label">ROLE:</span>
                   <span className="diag-value text-ok">{isHost ? 'HOST' : 'PARTNER'}</span>
+                </div>
+                <div className="diag-item">
+                  <span className="diag-label">Source Type:</span>
+                  <span className="diag-value">{resolvedSource?.sourceType || 'none'}</span>
                 </div>
                 <div className="diag-item">
                   <span className="diag-label">WebRTC conn:</span>
