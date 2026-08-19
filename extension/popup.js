@@ -2,6 +2,12 @@
 
 let currentTab = null;
 
+const WATCH_TOGETHER_URL_PATTERNS = [
+  'http://localhost:5173/*',
+  'http://127.0.0.1:5173/*',
+  'https://qualitytimestogether.netlify.app/*',
+];
+
 const tabTitleEl = document.getElementById('tab-title');
 const statusBadgeEl = document.getElementById('status-badge');
 const statusDotEl = document.getElementById('status-dot');
@@ -58,13 +64,7 @@ chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     return;
   }
 
-const WATCH_TOGETHER_URL_PATTERNS = [
-  'http://localhost:5173/*',
-  'http://127.0.0.1:5173/*',
-  'https://qualitytimestogether.netlify.app/*',
-];
-
-// Check if this tab is the WatchTogether app itself
+  // Check if this tab is the WatchTogether app itself
   if (
     url.includes('localhost:5173') ||
     url.includes('127.0.0.1:5173') ||

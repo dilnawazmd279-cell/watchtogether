@@ -60,7 +60,7 @@ async function startOffscreenCapture(streamId) {
           chromeMediaSourceId: streamId,
         },
       },
-    } as any);
+    });
     audioTrackLive = stream.getAudioTracks().length > 0;
   } catch (audioErr) {
     console.warn('[EXTENSION offscreen] Audio+Video capture failed, attempting video-only:', audioErr);
@@ -72,7 +72,7 @@ async function startOffscreenCapture(streamId) {
           chromeMediaSourceId: streamId,
         },
       },
-    } as any);
+    });
   }
 
   currentStream = stream;
