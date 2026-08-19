@@ -6,6 +6,7 @@ interface ExtWebSocket extends WebSocket {
   isAlive: boolean;
 }
 
+const BUILD_ID = 'render-clean-build-1';
 const PORT = parseInt(process.env.PORT || '3001', 10);
 const rooms = new Map<string, Room>();
 const socketToRoomPeer = new Map<WebSocket, { roomId: string; peerId: string }>();
@@ -23,10 +24,15 @@ const server = http.createServer((req, res) => {
   }
 
   if (req.url === '/health' || req.url === '/') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-store',
+    });
+
     res.end(
       JSON.stringify({
         status: 'ok',
+        buildId: BUILD_ID,
         activeRooms: rooms.size,
         timestamp: new Date().toISOString(),
       })
@@ -481,6 +487,10 @@ wss.on('connection', (ws: WebSocket) => {
 });
 
 server.listen(PORT, '0.0.0.0', () => {
+  console.log(
+    `[RENDER] BUILD_ID=${BUILD_ID}`
+  );
+
   console.log(
     `[RENDER] HTTP/WebSocket server listening on 0.0.0.0:${PORT}`
   );
