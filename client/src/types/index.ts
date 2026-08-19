@@ -76,6 +76,15 @@ export interface SyncStateEvent {
   sentAt: number;
 }
 
+export type MovieMessage =
+  | { type: 'movie-source'; url: string }
+  | { type: 'movie-state'; action: 'play'; currentTime: number }
+  | { type: 'movie-state'; action: 'pause'; currentTime: number }
+  | { type: 'movie-state'; action: 'seek'; currentTime: number }
+  | { type: 'movie-state'; action: 'sync'; currentTime: number; playing: boolean }
+  | { type: 'movie-state'; action: 'rate'; rate: number }
+  | { type: 'movie-state'; action: 'full-sync'; url: string; currentTime: number; playing: boolean; duration: number };
+
 export type ClientSignalingMessage =
   | { type: 'join-room'; roomId: string; peerId: string }
   | { type: 'leave-room'; roomId: string; peerId: string }
@@ -94,6 +103,7 @@ export type ClientSignalingMessage =
   | { type: 'media-sync'; currentTime: number; playing: boolean; sentAt: number; targetPeerId?: string; senderPeerId: string }
   | { type: 'media-state'; source: MediaSourceState | null; currentTime: number; playing: boolean; sentAt: number; targetPeerId?: string; senderPeerId: string }
   | { type: 'media-request-state'; targetPeerId?: string; senderPeerId: string }
+  | (MovieMessage & { targetPeerId?: string; senderPeerId: string; roomId?: string })
   | { type: 'ping' };
 
 export type ServerSignalingMessage =
@@ -116,5 +126,6 @@ export type ServerSignalingMessage =
   | { type: 'media-sync'; currentTime: number; playing: boolean; sentAt: number; senderPeerId: string }
   | { type: 'media-state'; source: MediaSourceState | null; currentTime: number; playing: boolean; sentAt: number; senderPeerId: string }
   | { type: 'media-request-state'; senderPeerId: string }
+  | (MovieMessage & { senderPeerId?: string })
   | { type: 'error'; message: string }
   | { type: 'pong' };

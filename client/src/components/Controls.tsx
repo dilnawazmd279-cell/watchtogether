@@ -15,7 +15,7 @@ interface ControlsProps {
   mediaState: MediaState;
   onToggleMic: () => void;
   onToggleCamera: () => void;
-  onToggleScreenShare: () => void;
+  onToggleScreenShare?: () => void;
   onLeaveRoom: () => void;
 }
 

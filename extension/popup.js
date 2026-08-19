@@ -26,7 +26,7 @@ function hideError() {
   errorBox.textContent = '';
 }
 
-// 1. Inspect Current Active Tab
+// 1. Inspect Current Active Tab & Active Streaming State
 chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
   currentTab = tabs[0];
 
@@ -67,13 +67,21 @@ chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     return;
   }
 
-  // Ready to capture
-  setStatus('ready', 'Ready');
-  startBtn.disabled = false;
+  // Check background service worker state
+  chrome.runtime.sendMessage({ type: 'WT_PING' }, (resp) => {
+    if (resp && resp.captureState === 'STREAMING' && resp.activeMovieTabId === currentTab.id) {
+      setStatus('streaming', 'Streaming');
+      startBtn.style.display = 'none';
+      stopBtn.style.display = 'flex';
+    } else {
+      setStatus('ready', 'Ready');
+      startBtn.disabled = false;
+    }
+  });
 });
 
 // 2. Click [ START CINEMA ]
-startBtn.addEventListener('click', () => {
+startBtn.addEventListener('click', async () => {
   if (!currentTab || !currentTab.id) return;
 
   hideError();
@@ -83,45 +91,72 @@ startBtn.addEventListener('click', () => {
   console.log('[EXT] activeTab invocation = true');
   console.log('[EXT] requesting tab capture for tab id:', currentTab.id);
 
-  try {
-    // Call chrome.tabCapture.getMediaStreamId from the popup with activeTab permission
-    chrome.tabCapture.getMediaStreamId({ targetTabId: currentTab.id }, (streamId) => {
-      if (chrome.runtime.lastError || !streamId) {
-        const errName = chrome.runtime.lastError?.name || 'TabCaptureError';
-        const errMsg = chrome.runtime.lastError?.message || 'Failed to capture tab';
-        console.error('[EXT] getMediaStreamId error.name =', errName);
-        console.error('[EXT] getMediaStreamId error.message =', errMsg);
-
-        startBtn.disabled = false;
-        startBtn.textContent = 'START CINEMA';
-        setStatus('error', 'Error');
-        showError('Capture failed: ' + errMsg);
-        return;
-      }
-
-      console.log('[EXT] getMediaStreamId = success, streamId =', streamId);
-      console.log('[EXT] movie capture started');
-
-      // Forward stream ID to background service worker and WatchTogether tabs
-      chrome.runtime.sendMessage({
-        type: 'WT_POPUP_CAPTURE_SUCCESS',
-        streamId,
-        tabId: currentTab.id,
-        tabTitle: currentTab.title,
-        tabUrl: currentTab.url,
-      }, () => {
+  // Part 16: Duplicate capture protection
+  if (chrome.tabCapture && typeof chrome.tabCapture.getCapturedTabs === 'function') {
+    try {
+      const capturedTabs = await chrome.tabCapture.getCapturedTabs();
+      const alreadyCaptured = capturedTabs.some((c) => c.tabId === currentTab.id && c.status === 'active');
+      if (alreadyCaptured) {
+        console.log('[EXT] Tab is already captured, reusing state');
         setStatus('streaming', 'Streaming');
         startBtn.style.display = 'none';
         stopBtn.style.display = 'flex';
-      });
-    });
-  } catch (err) {
-    console.error('[EXT] capture exception:', err);
-    startBtn.disabled = false;
-    startBtn.textContent = 'START CINEMA';
-    setStatus('error', 'Error');
-    showError('Error starting tab capture: ' + (err?.message || 'Unknown error'));
+        return;
+      }
+    } catch (e) {
+      console.warn('[EXT] getCapturedTabs check warning:', e);
+    }
   }
+
+  // Query WatchTogether App tab for consumer authorization
+  chrome.tabs.query({ url: ['http://localhost:5173/*', 'http://127.0.0.1:5173/*'] }, (wtTabs) => {
+    const consumerTabId = wtTabs && wtTabs.length > 0 ? wtTabs[0].id : undefined;
+    const captureOptions = consumerTabId
+      ? { targetTabId: currentTab.id, consumerTabId }
+      : { targetTabId: currentTab.id };
+
+    try {
+      chrome.tabCapture.getMediaStreamId(captureOptions, (streamId) => {
+        if (chrome.runtime.lastError || !streamId) {
+          const errName = chrome.runtime.lastError?.name || 'TabCaptureError';
+          const errMsg = chrome.runtime.lastError?.message || 'Failed to capture tab';
+          console.error('[EXT] getMediaStreamId error.name =', errName);
+          console.error('[EXT] getMediaStreamId error.message =', errMsg);
+
+          startBtn.disabled = false;
+          startBtn.textContent = 'START CINEMA';
+          setStatus('error', 'Error');
+          showError('Capture failed: ' + errMsg);
+          return;
+        }
+
+        console.log('[EXT] getMediaStreamId = success, streamId =', streamId);
+        console.log('[EXT] movie capture started');
+
+        // Forward stream ID to background service worker and WatchTogether tabs
+        chrome.runtime.sendMessage(
+          {
+            type: 'WT_POPUP_CAPTURE_SUCCESS',
+            streamId,
+            tabId: currentTab.id,
+            tabTitle: currentTab.title,
+            tabUrl: currentTab.url,
+          },
+          () => {
+            setStatus('streaming', 'Streaming');
+            startBtn.style.display = 'none';
+            stopBtn.style.display = 'flex';
+          }
+        );
+      });
+    } catch (err) {
+      console.error('[EXT] capture exception:', err);
+      startBtn.disabled = false;
+      startBtn.textContent = 'START CINEMA';
+      setStatus('error', 'Error');
+      showError('Error starting tab capture: ' + (err?.message || 'Unknown error'));
+    }
+  });
 });
 
 // 3. Click [ STOP CINEMA ]

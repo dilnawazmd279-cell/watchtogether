@@ -1,546 +1,182 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import {
-  Maximize2,
-  Minimize2,
-  Play,
-  Pause,
-  RotateCcw,
-  RotateCw,
-  Volume2,
-  VolumeX,
   X,
   Link as LinkIcon,
   Film,
   Activity,
-  AlertCircle,
+  Tv,
+  Square,
+  Volume2,
+  ExternalLink,
 } from 'lucide-react';
 import { MediaSourceState } from '../types';
-import { resolveMovieSource, normalizeMediaUrl, ResolvedMovieSource } from '../lib/mediaResolver';
+import { normalizeMediaUrl } from '../lib/mediaResolver';
+import { WebRTCStats, MovieTabInfo } from '../hooks/useWebRTC';
 
 interface ScreenShareViewProps {
   isHost: boolean;
-  remoteScreenStream: MediaStream | null;
-  localScreenStream: MediaStream | null;
-  localIsScreenSharing: boolean;
+  localMovieStream: MediaStream | null;
+  remoteMovieStream: MediaStream | null;
   mediaSource: MediaSourceState | null;
-  onSetMediaSource: (source: MediaSourceState | null) => void;
-  onStartStreaming: (stream: MediaStream) => void;
-  onStopStreaming: () => void;
-  onStartShare?: () => void;
-  onSendMovieControl?: (action: 'play' | 'pause' | 'seek', currentTime: number) => void;
+  movieTabInfo: MovieTabInfo | null;
+  isExtensionInstalled: boolean;
+  captureState: string;
+  webrtcStats: WebRTCStats;
+  onOpenMovieTab: (url: string) => void;
+  onStopCinema: () => void;
   partnerConnected: boolean;
   connState?: string;
   iceState?: string;
   signalingState?: string;
+  movieConnState?: string;
+  movieIceState?: string;
+  movieSignalingState?: string;
 }
 
 export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
   isHost,
-  remoteScreenStream,
-  localScreenStream,
-  localIsScreenSharing: _localIsScreenSharing,
-  mediaSource,
-  onSetMediaSource,
-  onStartStreaming,
-  onStopStreaming,
-  onStartShare: _onStartShare,
-  onSendMovieControl,
-  partnerConnected,
+  localMovieStream,
+  remoteMovieStream,
+  movieTabInfo,
+  isExtensionInstalled,
+  captureState,
+  webrtcStats,
+  onOpenMovieTab,
+  onStopCinema,
+  partnerConnected: _partnerConnected,
   connState = 'unknown',
   iceState = 'unknown',
   signalingState = 'unknown',
+  movieConnState = 'unknown',
+  movieIceState = 'unknown',
+  movieSignalingState = 'unknown',
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const hostVideoRef = useRef<HTMLVideoElement>(null);
-  const remoteMovieVideoRef = useRef<HTMLVideoElement>(null);
-  const localScreenVideoRef = useRef<HTMLVideoElement>(null);
+  const hostMovieVideoRef = useRef<HTMLVideoElement>(null);
+  const partnerMovieVideoRef = useRef<HTMLVideoElement>(null);
 
   // Single URL Input State
   const [inputUrl, setInputUrl] = useState('');
   const [urlNotice, setUrlNotice] = useState<string | null>(null);
-  const [resolvedSource, setResolvedSource] = useState<ResolvedMovieSource | null>(null);
-  const [isEmbedBlocked, setIsEmbedBlocked] = useState(false);
   const [showDebugPanel, setShowDebugPanel] = useState(false);
+  const [isPartnerAutoplayBlocked, setIsPartnerAutoplayBlocked] = useState(false);
 
-  // Host Video Playback States (Direct Media Only)
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
-  const [volume, setVolume] = useState(1.0);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [playbackRate, setPlaybackRate] = useState(1.0);
-  const [isFullscreen, setIsFullscreen] = useState(false);
-
-  // Partner Playback & Frame Diagnostics
-  const [partnerPlayStatus, setPartnerPlayStatus] = useState<'IDLE' | 'PLAYING' | 'MUTED' | 'ERROR'>('IDLE');
-  const [isPartnerAudioBlocked, setIsPartnerAudioBlocked] = useState(false);
-  const [hasRenderedFrame, setHasRenderedFrame] = useState(false);
-
-  // Live Metrics for Diagnostics
-  const [hostMetrics, setHostMetrics] = useState({
+  // Live video element diagnostics
+  const [playerMetrics, setPlayerMetrics] = useState({
     videoWidth: 0,
     videoHeight: 0,
-  });
-
-  const [partnerMetrics, setPartnerMetrics] = useState({
-    videoWidth: 0,
-    videoHeight: 0,
-    currentTime: 0,
     readyState: 0,
     paused: true,
   });
 
-  // Step 6: Verify Partner Video Mount / Unmount Lifecycle
+  // Attach local movie stream to Host preview video
   useEffect(() => {
-    if (!isHost) {
-      console.log('[PARTNER VIDEO] MOUNT');
-      return () => {
-        console.log('[PARTNER VIDEO] UNMOUNT');
-      };
-    }
-  }, [isHost]);
-
-  // Sync inputUrl with mediaSource if present
-  useEffect(() => {
-    if (mediaSource?.url && !inputUrl) {
-      setInputUrl(mediaSource.url);
-      try {
-        const resolved = resolveMovieSource(mediaSource.url);
-        setResolvedSource(resolved);
-      } catch {
-        // Ignore parsing errors on sync
-      }
-    }
-  }, [mediaSource?.url]);
-
-  // =========================================================================
-  // STEP 1 & 10: HOST CAPTURESTREAM & MOVIE STREAMING PIPELINE
-  // =========================================================================
-  const captureAndStreamHostVideo = useCallback(() => {
-    const video = hostVideoRef.current;
+    const video = hostMovieVideoRef.current;
     if (!video || !isHost) return;
 
-    console.log('[HOST MOVIE]');
-    console.log('source URL:', mediaSource?.url);
-    console.log('[HOST MOVIE]');
-    console.log('videoWidth:', video.videoWidth);
-    console.log('[HOST MOVIE]');
-    console.log('videoHeight:', video.videoHeight);
-
-    const captureFn = (video as any).captureStream || (video as any).mozCaptureStream;
-    if (typeof captureFn === 'function') {
-      try {
-        const stream: MediaStream = captureFn.call(video);
-        const videoTracks = stream.getVideoTracks();
-        const audioTracks = stream.getAudioTracks();
-
-        console.log('[HOST MOVIE]');
-        console.log('captureStream video tracks:', videoTracks.length);
-        console.log('[HOST MOVIE]');
-        console.log('captureStream audio tracks:', audioTracks.length);
-
-        if (videoTracks.length > 0) {
-          onStartStreaming(stream);
-        }
-      } catch (err) {
-        console.warn('[HOST MOVIE] captureStream error:', err);
+    if (localMovieStream) {
+      if (video.srcObject !== localMovieStream) {
+        video.srcObject = localMovieStream;
       }
+      video.play().catch((e) => console.log('[HOST MOVIE PREVIEW] play error:', e?.name));
     } else {
-      setUrlNotice('Your browser does not support video stream capture. Please use Chrome, Edge, or Firefox.');
+      video.srcObject = null;
     }
-  }, [isHost, mediaSource?.url, onStartStreaming]);
+  }, [localMovieStream, isHost]);
 
-  // Host Video Event Handlers
-  const handleHostLoadedMetadata = () => {
-    const video = hostVideoRef.current;
-    if (!video) return;
+  // Attach remote movie stream to Partner movie video
+  useEffect(() => {
+    const video = partnerMovieVideoRef.current;
+    if (!video || isHost) return;
 
-    setDuration(video.duration || 0);
-    setHostMetrics({
-      videoWidth: video.videoWidth,
-      videoHeight: video.videoHeight,
-    });
-
-    captureAndStreamHostVideo();
-
-    video.play().catch((err) => {
-      console.log('[HOST MOVIE] Autoplay prompt needed:', err?.name);
-    });
-  };
-
-  const handleHostCanPlay = () => {
-    captureAndStreamHostVideo();
-  };
-
-  const handleHostPlaying = () => {
-    setIsPlaying(true);
-    captureAndStreamHostVideo();
-    onSendMovieControl?.('play', hostVideoRef.current?.currentTime || 0);
-  };
-
-  const handleHostPause = () => {
-    setIsPlaying(false);
-    onSendMovieControl?.('pause', hostVideoRef.current?.currentTime || 0);
-  };
-
-  const handleHostTimeUpdate = () => {
-    const video = hostVideoRef.current;
-    if (!video) return;
-    setCurrentTime(video.currentTime);
-  };
-
-  const handleHostSeeked = () => {
-    const video = hostVideoRef.current;
-    if (!video) return;
-    onSendMovieControl?.('seek', video.currentTime);
-  };
-
-  const handleHostError = () => {
-    const video = hostVideoRef.current;
-    const error = video?.error;
-    if (error) {
-      setUrlNotice(`Video could not be loaded (Error code ${error.code}). The source may block direct playback.`);
-    }
-  };
-
-  // =========================================================================
-  // HOST CONTROLS (PLAY, PAUSE, SEEK, SKIP 10S, VOLUME, SPEED, FULLSCREEN)
-  // =========================================================================
-  const togglePlayPause = () => {
-    const video = hostVideoRef.current;
-    if (!video) return;
-
-    if (video.paused) {
-      video.play().catch((err) => console.warn('[HOST] Play error:', err));
-    } else {
-      video.pause();
-    }
-  };
-
-  const skipBackward10 = () => {
-    const video = hostVideoRef.current;
-    if (!video) return;
-
-    video.currentTime = Math.max(0, video.currentTime - 10);
-    onSendMovieControl?.('seek', video.currentTime);
-  };
-
-  const skipForward10 = () => {
-    const video = hostVideoRef.current;
-    if (!video) return;
-
-    video.currentTime = Math.min(video.duration || 0, video.currentTime + 10);
-    onSendMovieControl?.('seek', video.currentTime);
-  };
-
-  const handleSeekChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const video = hostVideoRef.current;
-    if (!video) return;
-
-    const newTime = parseFloat(e.target.value);
-    video.currentTime = newTime;
-    setCurrentTime(newTime);
-    onSendMovieControl?.('seek', newTime);
-  };
-
-  const toggleMute = () => {
-    const video = hostVideoRef.current;
-    if (!video) return;
-
-    video.muted = !video.muted;
-    setIsMuted(video.muted);
-  };
-
-  const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const video = hostVideoRef.current;
-    if (!video) return;
-
-    const newVol = parseFloat(e.target.value);
-    video.volume = newVol;
-    setVolume(newVol);
-    if (newVol > 0 && video.muted) {
+    if (remoteMovieStream && remoteMovieStream.getVideoTracks().length > 0) {
+      if (video.srcObject !== remoteMovieStream) {
+        video.srcObject = remoteMovieStream;
+      }
       video.muted = false;
-      setIsMuted(false);
+      video
+        .play()
+        .then(() => {
+          setIsPartnerAutoplayBlocked(false);
+        })
+        .catch((err) => {
+          console.warn('[PARTNER MOVIE] Autoplay with sound restricted:', err?.name);
+          // Fallback to muted playback if audio policy blocked it
+          video.muted = true;
+          video
+            .play()
+            .then(() => {
+              setIsPartnerAutoplayBlocked(true);
+            })
+            .catch((e) => console.error('[PARTNER MOVIE] play failed:', e));
+        });
+    } else {
+      video.srcObject = null;
+      setIsPartnerAutoplayBlocked(false);
     }
-  };
+  }, [remoteMovieStream, isHost]);
 
-  const handleSpeedChange = (speed: number) => {
-    const video = hostVideoRef.current;
+  // Track player metrics for DEV diagnostics
+  useEffect(() => {
+    const video = isHost ? hostMovieVideoRef.current : partnerMovieVideoRef.current;
     if (!video) return;
 
-    video.playbackRate = speed;
-    setPlaybackRate(speed);
-  };
+    const updateMetrics = () => {
+      setPlayerMetrics({
+        videoWidth: video.videoWidth || 0,
+        videoHeight: video.videoHeight || 0,
+        readyState: video.readyState,
+        paused: video.paused,
+      });
+    };
 
-  const toggleHostFullscreen = async () => {
-    const video = hostVideoRef.current;
-    if (!video) return;
+    video.addEventListener('loadedmetadata', updateMetrics);
+    video.addEventListener('resize', updateMetrics);
+    video.addEventListener('playing', updateMetrics);
+    video.addEventListener('pause', updateMetrics);
 
-    try {
-      if (!document.fullscreenElement) {
-        if (video.requestFullscreen) {
-          await video.requestFullscreen();
-        } else if ((video as any).webkitRequestFullscreen) {
-          await (video as any).webkitRequestFullscreen();
-        }
-        setIsFullscreen(true);
-      } else {
-        await document.exitFullscreen();
-        setIsFullscreen(false);
-      }
-    } catch (err) {
-      console.warn('Fullscreen toggle error:', err);
-    }
-  };
+    updateMetrics();
 
-  // =========================================================================
-  // SINGLE URL OPEN HANDLER (SMART ROUTER)
-  // =========================================================================
+    return () => {
+      video.removeEventListener('loadedmetadata', updateMetrics);
+      video.removeEventListener('resize', updateMetrics);
+      video.removeEventListener('playing', updateMetrics);
+      video.removeEventListener('pause', updateMetrics);
+    };
+  }, [isHost, localMovieStream, remoteMovieStream]);
+
+  // Handle URL Submit (Host)
   const handleOpenMovie = useCallback(() => {
     setUrlNotice(null);
-    setIsEmbedBlocked(false);
     const raw = inputUrl.trim();
 
     if (!raw) {
-      setUrlNotice('Please enter a video or movie link.');
+      setUrlNotice('Please enter a movie or video URL.');
       return;
     }
 
     try {
       const normalized = normalizeMediaUrl(raw);
-      const resolved = resolveMovieSource(normalized);
-      setResolvedSource(resolved);
-
-      onSetMediaSource({
-        url: resolved.url,
-        type: resolved.sourceType === 'direct-media' ? 'direct-video' : 'webpage',
-        title: resolved.title,
-        currentTime: 0,
-        isPlaying: false,
-        updatedAt: Date.now(),
-      });
-      setInputUrl(resolved.url);
+      onOpenMovieTab(normalized);
     } catch (err: any) {
       setUrlNotice(err?.message || 'Please enter a valid URL.');
     }
-  }, [inputUrl, onSetMediaSource]);
-
-  const handleClearMovie = useCallback(() => {
-    onSetMediaSource(null);
-    setResolvedSource(null);
-    setInputUrl('');
-    setUrlNotice(null);
-    setIsEmbedBlocked(false);
-    setIsPlaying(false);
-    onStopStreaming();
-  }, [onSetMediaSource, onStopStreaming]);
-
-  // =========================================================================
-  // STEP 3, 4, 5, 8 & 9: PARTNER REMOTE MOVIE PLAYBACK & FRAME DIAGNOSTICS
-  // =========================================================================
-  useEffect(() => {
-    const video = remoteMovieVideoRef.current;
-    if (!video || isHost) return;
-
-    const hasVideoTracks = remoteScreenStream && remoteScreenStream.getVideoTracks().length > 0;
-    const hasAudioTracks = remoteScreenStream && remoteScreenStream.getAudioTracks().length > 0;
-
-    console.log('[PARTNER MOVIE]');
-    console.log('video track received:', hasVideoTracks ? 'YES' : 'NO');
-    console.log('[PARTNER MOVIE]');
-    console.log('audio track received:', hasAudioTracks ? 'YES' : 'NO');
-    console.log('[PARTNER MOVIE]');
-    console.log(
-      `remoteMovieStream tracks: video=${remoteScreenStream?.getVideoTracks().length || 0} audio=${remoteScreenStream?.getAudioTracks().length || 0}`
-    );
-    console.log('[PARTNER MOVIE]');
-    console.log('srcObject:', remoteScreenStream ? 'attached' : 'missing');
-
-    if (!hasVideoTracks || !remoteScreenStream) {
-      setPartnerPlayStatus('IDLE');
-      setIsPartnerAudioBlocked(false);
-      return;
-    }
-
-    // Step 7 & 8: Assign remoteMovieStream if not already assigned
-    if (video.srcObject !== remoteScreenStream) {
-      video.srcObject = remoteScreenStream;
-      console.log('[PARTNER MOVIE] srcObject assigned to remoteMovieStream');
-    }
-
-    video.autoplay = true;
-    video.playsInline = true;
-    video.controls = false;
-
-    let isMounted = true;
-
-    // Step 4: requestVideoFrameCallback frame render detection
-    if ('requestVideoFrameCallback' in video) {
-      let isChecking = true;
-      const checkFrame = () => {
-        if (!isChecking) return;
-        console.log('[PARTNER VIDEO] FRAME RENDERED');
-        if (isMounted) setHasRenderedFrame(true);
-        (video as any).requestVideoFrameCallback(checkFrame);
-      };
-      (video as any).requestVideoFrameCallback(checkFrame);
-    }
-
-    const logPartnerVideoState = (eventName: string) => {
-      console.log(`[PARTNER VIDEO] ${eventName}`);
-      console.log('[PARTNER VIDEO]');
-      console.log('readyState:', video.readyState);
-      console.log('networkState:', video.networkState);
-      console.log('paused:', video.paused);
-      console.log('currentTime:', video.currentTime);
-      console.log('duration:', video.duration);
-      console.log('videoWidth:', video.videoWidth);
-      console.log('videoHeight:', video.videoHeight);
-    };
-
-    // Step 5: Verify Partner Video DOM Visibility & Geometry
-    const logDomMetrics = () => {
-      const rect = video.getBoundingClientRect();
-      const computed = window.getComputedStyle(video);
-      console.log('[PARTNER VIDEO DOM]');
-      console.log('rect.width:', rect.width);
-      console.log('rect.height:', rect.height);
-      console.log('offsetWidth:', video.offsetWidth);
-      console.log('offsetHeight:', video.offsetHeight);
-      console.log('computed display:', computed.display);
-      console.log('computed visibility:', computed.visibility);
-      console.log('computed opacity:', computed.opacity);
-      console.log('computed zIndex:', computed.zIndex);
-      console.log('computed position:', computed.position);
-    };
-
-    const attemptPartnerPlay = async () => {
-      if (!isMounted || !video) return;
-
-      try {
-        video.muted = false;
-        await video.play();
-        console.log('[PARTNER MOVIE]');
-        console.log('play: SUCCESS');
-        if (isMounted) {
-          setPartnerPlayStatus('PLAYING');
-          setIsPartnerAudioBlocked(false);
-        }
-        logDomMetrics();
-      } catch (err: any) {
-        console.warn('[PARTNER MOVIE] unmuted autoplay blocked, attempting muted playback:', err?.name);
-        try {
-          // Step 8: Fallback to muted playback if autoplay policy blocks sound
-          video.muted = true;
-          await video.play();
-          console.log('[PARTNER MOVIE]');
-          console.log('play: SUCCESS (muted)');
-          if (isMounted) {
-            setPartnerPlayStatus('MUTED');
-            setIsPartnerAudioBlocked(true);
-          }
-          logDomMetrics();
-        } catch (mutedErr) {
-          console.error('[PARTNER MOVIE]');
-          console.error('play: FAILED', mutedErr);
-          if (isMounted) {
-            setPartnerPlayStatus('ERROR');
-          }
-        }
-      }
-    };
-
-    const onLoadedMetadata = () => {
-      logPartnerVideoState('loadedmetadata');
-      setPartnerMetrics((prev) => ({
-        ...prev,
-        videoWidth: video.videoWidth,
-        videoHeight: video.videoHeight,
-        readyState: video.readyState,
-        paused: video.paused,
-      }));
-      attemptPartnerPlay();
-    };
-
-    const onLoadedData = () => logPartnerVideoState('loadeddata');
-    const onCanPlay = () => {
-      logPartnerVideoState('canplay');
-      attemptPartnerPlay();
-    };
-    const onPlaying = () => {
-      console.log('[PARTNER VIDEO] playing');
-      logDomMetrics();
-    };
-    const onResize = () => {
-      console.log(`[PARTNER VIDEO] resize: ${video.videoWidth} x ${video.videoHeight}`);
-      setPartnerMetrics((prev) => ({
-        ...prev,
-        videoWidth: video.videoWidth,
-        videoHeight: video.videoHeight,
-      }));
-    };
-    const onError = () => {
-      console.log('[PARTNER VIDEO] error:', video.error?.code, video.error?.message);
-    };
-
-    const onTimeUpdate = () => {
-      setPartnerMetrics((prev) => ({
-        ...prev,
-        currentTime: video.currentTime,
-        videoWidth: video.videoWidth,
-        videoHeight: video.videoHeight,
-        readyState: video.readyState,
-        paused: video.paused,
-      }));
-    };
-
-    video.addEventListener('loadedmetadata', onLoadedMetadata);
-    video.addEventListener('loadeddata', onLoadedData);
-    video.addEventListener('canplay', onCanPlay);
-    video.addEventListener('playing', onPlaying);
-    video.addEventListener('resize', onResize);
-    video.addEventListener('error', onError);
-    video.addEventListener('timeupdate', onTimeUpdate);
-
-    if (video.readyState >= 2) {
-      onLoadedMetadata();
-    } else {
-      attemptPartnerPlay();
-    }
-
-    return () => {
-      isMounted = false;
-      video.removeEventListener('loadedmetadata', onLoadedMetadata);
-      video.removeEventListener('loadeddata', onLoadedData);
-      video.removeEventListener('canplay', onCanPlay);
-      video.removeEventListener('playing', onPlaying);
-      video.removeEventListener('resize', onResize);
-      video.removeEventListener('error', onError);
-      video.removeEventListener('timeupdate', onTimeUpdate);
-    };
-  }, [remoteScreenStream, isHost]);
+  }, [inputUrl, onOpenMovieTab]);
 
   const handlePartnerEnableAudio = () => {
-    const video = remoteMovieVideoRef.current;
+    const video = partnerMovieVideoRef.current;
     if (!video) return;
     video.muted = false;
-    setIsPartnerAudioBlocked(false);
+    setIsPartnerAutoplayBlocked(false);
   };
 
-  const formatTime = (seconds: number) => {
-    if (!seconds || isNaN(seconds)) return '0:00';
-    const m = Math.floor(seconds / 60);
-    const s = Math.floor(seconds % 60);
-    return `${m}:${s < 10 ? '0' : ''}${s}`;
-  };
-
-  const remoteVideoTrack = remoteScreenStream?.getVideoTracks()[0] || null;
-  const remoteAudioTrack = remoteScreenStream?.getAudioTracks()[0] || null;
-  const isDirectMediaActive = mediaSource?.type === 'direct-video' || resolvedSource?.sourceType === 'direct-media';
-  const isEmbeddableActive = !isDirectMediaActive && mediaSource && resolvedSource?.sourceType === 'embeddable-page';
-
-  // Step 7: Partner waiting state strictly depends on remoteMovieStream having real video tracks
-  const hasPartnerReceivedMovie = !isHost && remoteScreenStream && remoteScreenStream.getVideoTracks().length > 0;
+  const activeVideoTrack = isHost
+    ? localMovieStream?.getVideoTracks()[0]
+    : remoteMovieStream?.getVideoTracks()[0];
+  const activeAudioTrack = isHost
+    ? localMovieStream?.getAudioTracks()[0]
+    : remoteMovieStream?.getAudioTracks()[0];
+  const trackSettings = activeVideoTrack?.getSettings();
 
   return (
     <div className="movie-section-container" ref={containerRef} id="screen-stage">
@@ -564,19 +200,21 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
                 onChange={(e) => {
                   setInputUrl(e.target.value);
                   if (urlNotice) setUrlNotice(null);
-                  if (isEmbedBlocked) setIsEmbedBlocked(false);
                 }}
-                placeholder="Paste movie link (.mp4, YouTube, or web link)..."
+                placeholder="Paste any movie or video link (YouTube, Netflix, Prime, web page)..."
                 className="media-url-input"
                 id="movie-url-input"
                 autoComplete="off"
               />
-              {mediaSource && (
+              {inputUrl && (
                 <button
                   type="button"
-                  onClick={handleClearMovie}
+                  onClick={() => {
+                    setInputUrl('');
+                    setUrlNotice(null);
+                  }}
                   className="url-clear-btn"
-                  title="Close movie"
+                  title="Clear input"
                 >
                   <X size={14} />
                 </button>
@@ -588,8 +226,8 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
               className="btn-open-url"
               id="movie-url-open-btn"
             >
-              <Play size={13} fill="currentColor" />
-              <span>OPEN</span>
+              <ExternalLink size={13} />
+              <span>OPEN MOVIE</span>
             </button>
           </form>
 
@@ -598,192 +236,68 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
       )}
 
       {/* =========================================================================
-          STEP 6: MOVIE VIEWPORT: STABLE DOM ELEMENT FOR ACTIVE VIEWER
+          MOVIE VIEWPORT: STABLE DOM STAGE
           ========================================================================= */}
       <div className="movie-viewport-stage">
         {isHost ? (
           /* ---------------------------------------------------------------------
-             HOST VIEW: DIRECT VIDEO / EMBED IFRAME / BLOCKED NOTICE / EMPTY STAGE
+             HOST VIEW: LOCAL MOVIE STREAM PREVIEW / EXTENSION INSTRUCTION / EMPTY STAGE
              --------------------------------------------------------------------- */
-          isEmbedBlocked ? (
-            /* BLOCKED WEBPAGE FALLBACK */
-            <div className="unsupported-site-card">
-              <div className="unsupported-icon-wrap">
-                <AlertCircle size={34} className="unsupported-icon" />
-              </div>
-              <h3 className="unsupported-title">This site doesn't allow in-app playback.</h3>
-              <p className="unsupported-desc">
-                Try a direct video link or a supported player.
-              </p>
-              <button
-                type="button"
-                onClick={handleClearMovie}
-                className="btn-primary-stage"
-              >
-                <span>Try Another Link</span>
-              </button>
-            </div>
-          ) : isDirectMediaActive ? (
-            /* A. DIRECT MEDIA: NATIVE HTML5 VIDEO WITH HOST CONTROLS */
+          localMovieStream ? (
             <div className="media-player-wrapper host-cinema-wrapper">
               <video
-                ref={hostVideoRef}
-                src={mediaSource?.url}
-                crossOrigin="anonymous"
-                playsInline
-                preload="metadata"
-                onLoadedMetadata={handleHostLoadedMetadata}
-                onCanPlay={handleHostCanPlay}
-                onPlaying={handleHostPlaying}
-                onPause={handleHostPause}
-                onTimeUpdate={handleHostTimeUpdate}
-                onSeeked={handleHostSeeked}
-                onError={handleHostError}
-                className="screen-video direct-video-player"
-                id="host-movie-video"
-                onClick={togglePlayPause}
-              />
-
-              {/* HOST MOVIE CONTROL BAR (DIRECT MEDIA ONLY) */}
-              <div className="host-movie-controls-bar" role="toolbar" aria-label="Movie controls">
-                {/* Seek Progress Bar */}
-                <div className="movie-seek-container">
-                  <span className="movie-time-label">{formatTime(currentTime)}</span>
-                  <input
-                    type="range"
-                    min="0"
-                    max={duration || 100}
-                    step="0.1"
-                    value={currentTime}
-                    onChange={handleSeekChange}
-                    className="movie-seek-slider"
-                    aria-label="Seek time"
-                  />
-                  <span className="movie-time-label">{formatTime(duration)}</span>
-                </div>
-
-                {/* Control Action Buttons */}
-                <div className="movie-controls-actions">
-                  <div className="controls-left-group">
-                    {/* -10s Back */}
-                    <button
-                      type="button"
-                      onClick={skipBackward10}
-                      className="btn-movie-ctrl"
-                      title="Rewind 10 seconds"
-                    >
-                      <RotateCcw size={15} />
-                      <span className="btn-ctrl-sub">10</span>
-                    </button>
-
-                    {/* Play / Pause Toggle */}
-                    <button
-                      type="button"
-                      onClick={togglePlayPause}
-                      className="btn-movie-ctrl btn-play-pause"
-                      title={isPlaying ? 'Pause' : 'Play'}
-                    >
-                      {isPlaying ? <Pause size={17} fill="currentColor" /> : <Play size={17} fill="currentColor" />}
-                    </button>
-
-                    {/* +10s Forward */}
-                    <button
-                      type="button"
-                      onClick={skipForward10}
-                      className="btn-movie-ctrl"
-                      title="Skip forward 10 seconds"
-                    >
-                      <RotateCw size={15} />
-                      <span className="btn-ctrl-sub">10</span>
-                    </button>
-
-                    {/* Volume & Mute */}
-                    <div className="volume-control-wrap">
-                      <button
-                        type="button"
-                        onClick={toggleMute}
-                        className="btn-movie-ctrl"
-                        title={isMuted ? 'Unmute' : 'Mute'}
-                      >
-                        {isMuted || volume === 0 ? <VolumeX size={16} /> : <Volume2 size={16} />}
-                      </button>
-                      <input
-                        type="range"
-                        min="0"
-                        max="1"
-                        step="0.05"
-                        value={isMuted ? 0 : volume}
-                        onChange={handleVolumeChange}
-                        className="volume-slider"
-                        aria-label="Volume"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="controls-right-group">
-                    {/* Speed Selector */}
-                    <div className="speed-selector">
-                      {[0.75, 1.0, 1.25, 1.5, 2.0].map((s) => (
-                        <button
-                          key={s}
-                          type="button"
-                          onClick={() => handleSpeedChange(s)}
-                          className={`btn-speed-pill ${playbackRate === s ? 'active' : ''}`}
-                        >
-                          {s}x
-                        </button>
-                      ))}
-                    </div>
-
-                    {/* Fullscreen Video */}
-                    <button
-                      type="button"
-                      onClick={toggleHostFullscreen}
-                      className="btn-movie-ctrl"
-                      title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
-                    >
-                      {isFullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : isEmbeddableActive && resolvedSource?.embedUrl ? (
-            /* B. EMBEDDABLE WEBPAGE: LEGITIMATE IFRAME PLAYER */
-            <div className="media-player-wrapper embed-player-wrapper">
-              <iframe
-                src={resolvedSource.embedUrl}
-                title={resolvedSource.title || 'Movie Embed'}
-                allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
-                allowFullScreen
-                className="screen-video embed-iframe"
-                onError={() => setIsEmbedBlocked(true)}
-              />
-
-              {/* Discreet Floating Bar with Fallback Option */}
-              <div className="embed-floating-notice-bar">
-                <span className="embed-title-text">{resolvedSource.title}</span>
-                <button
-                  type="button"
-                  onClick={() => setIsEmbedBlocked(true)}
-                  className="btn-report-blocked"
-                  title="If this video does not load, click here"
-                >
-                  Can't see the video?
-                </button>
-              </div>
-            </div>
-          ) : localScreenStream ? (
-            /* HOST LOCAL PRESENTATION PREVIEW */
-            <div className="media-player-wrapper">
-              <video
-                ref={localScreenVideoRef}
-                className="screen-video presentation-video"
+                ref={hostMovieVideoRef}
                 autoPlay
                 playsInline
                 muted
-                id="local-screen-video"
+                className="screen-video live-cinema-video"
+                id="host-movie-video"
               />
+
+              {/* Host Live Cinema Overlay Bar */}
+              <div className="host-cinema-overlay-bar">
+                <div className="cinema-live-indicator">
+                  <span className="live-dot" />
+                  <span className="live-text">CINEMA STREAMING TO PARTNER</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={onStopCinema}
+                  className="btn-stop-cinema-overlay"
+                  title="Stop streaming movie"
+                >
+                  <Square size={13} fill="currentColor" />
+                  <span>STOP CINEMA</span>
+                </button>
+              </div>
+            </div>
+          ) : movieTabInfo?.url ? (
+            /* INSTRUCTION CARD: WAITING FOR HOST TO CLICK EXTENSION */
+            <div className="empty-stage-card tab-opened-card">
+              <div className="empty-stage-marquee-icon">
+                <Tv size={36} className="marquee-film-icon text-accent" />
+              </div>
+              <h2 className="empty-stage-title">Movie tab opened!</h2>
+              <div className="tab-instruction-steps">
+                <div className="instruction-step">
+                  <span className="step-num">1</span>
+                  <span>Switch to the movie tab: <strong>{movieTabInfo.title || movieTabInfo.url}</strong></span>
+                </div>
+                <div className="instruction-step">
+                  <span className="step-num">2</span>
+                  <span>Click the <strong>WatchTogether Cinema</strong> extension icon in your Chrome toolbar</span>
+                </div>
+                <div className="instruction-step">
+                  <span className="step-num">3</span>
+                  <span>Click <strong>START CINEMA</strong> to stream the tab video and audio live</span>
+                </div>
+              </div>
+
+              {!isExtensionInstalled && (
+                <p className="extension-missing-note">
+                  Tip: Make sure the WatchTogether Chrome extension is loaded in chrome://extensions.
+                </p>
+              )}
             </div>
           ) : (
             /* HOST COMPACT ELEGANT EMPTY CINEMA STAGE */
@@ -793,56 +307,49 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
               </div>
               <h2 className="empty-stage-title">What's on tonight?</h2>
               <p className="empty-stage-desc">
-                Add a movie when you're ready. Paste a direct video link (.mp4) or supported player above.
+                Paste any movie or video link above and click <strong>OPEN MOVIE</strong>. Then start Cinema from the extension to stream live!
               </p>
             </div>
           )
         ) : (
           /* ---------------------------------------------------------------------
-             PARTNER VIEW: STABLE, PERMANENTLY MOUNTED MOVIE VIDEO IN DOM
+             PARTNER VIEW: READ-ONLY LIVE STREAMED MOVIE (NO CONTROLS)
              --------------------------------------------------------------------- */
           <div className="media-player-wrapper partner-cinema-wrapper">
-            {/* Step 6 & 10: Exactly ONE permanent dedicated movie video element */}
             <video
-              ref={remoteMovieVideoRef}
-              className={`screen-video presentation-video partner-debug-video ${hasPartnerReceivedMovie ? 'visible-movie' : 'hidden-movie'}`}
+              ref={partnerMovieVideoRef}
               autoPlay
               playsInline
               controls={false}
+              className={`screen-video presentation-video ${remoteMovieStream ? 'visible-movie' : 'hidden-movie'}`}
               id="partner-movie-video"
             />
 
-            {/* Step 7: Waiting state displayed while no video track exists */}
-            {!hasPartnerReceivedMovie && (
+            {/* Waiting state displayed while Host is not streaming */}
+            {!remoteMovieStream && (
               <div className="empty-stage-card">
                 <div className="empty-stage-marquee-icon">
                   <Film size={34} className="marquee-film-icon" />
                 </div>
                 <h2 className="empty-stage-title">Waiting for Host Movie...</h2>
                 <p className="empty-stage-desc">
-                  The Host controls the movie stream. As soon as the Host plays a movie, it will appear here in real time.
+                  The Host controls the movie stream. As soon as the Host starts Cinema, the live movie stream will appear here in real time.
                 </p>
               </div>
             )}
 
-            {/* Step 11: In-Viewport Debug Diagnostics */}
-            <div className="partner-viewport-debug-tag">
-              <span>
-                DEBUG | {partnerMetrics.videoWidth}x{partnerMetrics.videoHeight} | State:{partnerMetrics.readyState} | Time:{partnerMetrics.currentTime.toFixed(1)}s | FrameRendered:{hasRenderedFrame ? 'YES' : 'NO'} | Status:{partnerPlayStatus}
-              </span>
-            </div>
-
-            {/* Audio Enable Pill if browser restricted audio */}
-            {isPartnerAudioBlocked && hasPartnerReceivedMovie && (
+            {/* Autoplay blocked banner with tap-to-start audio */}
+            {isPartnerAutoplayBlocked && remoteMovieStream && (
               <div className="partner-audio-notice-bar">
                 <button
+                  type="button"
                   onClick={handlePartnerEnableAudio}
                   className="btn-enable-audio-pill"
-                  title="Enable movie sound"
+                  title="Enable movie audio"
                   id="enable-movie-audio-btn"
                 >
                   <Volume2 size={15} />
-                  <span>ENABLE MOVIE AUDIO</span>
+                  <span>Tap once to start movie audio</span>
                 </button>
               </div>
             )}
@@ -850,7 +357,7 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
         )}
 
         {/* =========================================================================
-            DEVELOPMENT DIAGNOSTICS (DEV Toggle Only)
+            PART 14: DEVELOPMENT-ONLY DIAGNOSTICS (DEV Toggle)
             ========================================================================= */}
         <div className="cinema-dev-pill-wrap">
           <button
@@ -871,91 +378,124 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
                   <span className="diag-value text-ok">{isHost ? 'HOST' : 'PARTNER'}</span>
                 </div>
                 <div className="diag-item">
-                  <span className="diag-label">Source Type:</span>
-                  <span className="diag-value">{resolvedSource?.sourceType || 'none'}</span>
+                  <span className="diag-label">Capture State:</span>
+                  <span className="diag-value">{captureState}</span>
+                </div>
+
+                {/* CAPTURE METRICS */}
+                <div className="diag-item full-width">
+                  <span className="diag-label">TAB:</span>
+                  <span className="diag-value">
+                    {movieTabInfo?.title || movieTabInfo?.url || 'none'} {movieTabInfo?.tabId ? `(id: ${movieTabInfo.tabId})` : ''}
+                  </span>
                 </div>
                 <div className="diag-item">
-                  <span className="diag-label">WebRTC conn:</span>
+                  <span className="diag-label">Video Track:</span>
+                  <span className={`diag-value ${activeVideoTrack?.readyState === 'live' ? 'text-ok' : 'text-warn'}`}>
+                    {activeVideoTrack?.readyState || 'none'}
+                  </span>
+                </div>
+                <div className="diag-item">
+                  <span className="diag-label">Audio Track:</span>
+                  <span className={`diag-value ${activeAudioTrack?.readyState === 'live' ? 'text-ok' : 'text-muted'}`}>
+                    {activeAudioTrack?.readyState || 'none'}
+                  </span>
+                </div>
+                <div className="diag-item">
+                  <span className="diag-label">Source Size:</span>
+                  <span className="diag-value">
+                    {trackSettings?.width ? `${trackSettings.width}x${trackSettings.height} @ ${trackSettings.frameRate?.toFixed(0)}fps` : 'none'}
+                  </span>
+                </div>
+
+                {/* MOVIE PC STATES */}
+                <div className="diag-item">
+                  <span className="diag-label">Movie PC Conn:</span>
+                  <span className={`diag-value ${movieConnState === 'connected' ? 'text-ok' : 'text-warn'}`}>
+                    {movieConnState}
+                  </span>
+                </div>
+                <div className="diag-item">
+                  <span className="diag-label">Movie ICE:</span>
+                  <span className="diag-value">{movieIceState}</span>
+                </div>
+                <div className="diag-item">
+                  <span className="diag-label">Movie Signaling:</span>
+                  <span className="diag-value">{movieSignalingState}</span>
+                </div>
+
+                {/* CAMERA & CHAT PC STATES */}
+                <div className="diag-item">
+                  <span className="diag-label">Camera Conn:</span>
                   <span className="diag-value">{connState}</span>
                 </div>
                 <div className="diag-item">
-                  <span className="diag-label">ICE state:</span>
+                  <span className="diag-label">Camera ICE:</span>
                   <span className="diag-value">{iceState}</span>
                 </div>
                 <div className="diag-item">
-                  <span className="diag-label">Signaling:</span>
+                  <span className="diag-label">Camera Signaling:</span>
                   <span className="diag-value">{signalingState}</span>
                 </div>
 
+                {/* OUTBOUND / INBOUND WEBRTC STATS */}
                 {isHost ? (
                   <>
-                    <div className="diag-item full-width">
-                      <span className="diag-label">URL:</span>
-                      <span className="diag-value">{mediaSource?.url || 'none'}</span>
+                    <div className="diag-item">
+                      <span className="diag-label">Frames Sent:</span>
+                      <span className="diag-value">{webrtcStats.framesSent}</span>
                     </div>
                     <div className="diag-item">
-                      <span className="diag-label">Partner:</span>
-                      <span className={`diag-value ${partnerConnected ? 'text-ok' : 'text-warn'}`}>
-                        {partnerConnected ? 'CONNECTED' : 'WAITING'}
-                      </span>
+                      <span className="diag-label">Frames Encoded:</span>
+                      <span className="diag-value">{webrtcStats.framesEncoded}</span>
                     </div>
                     <div className="diag-item">
-                      <span className="diag-label">Host size:</span>
+                      <span className="diag-label">Outbound Res:</span>
                       <span className="diag-value">
-                        {hostMetrics.videoWidth}x{hostMetrics.videoHeight}
+                        {webrtcStats.outboundWidth}x{webrtcStats.outboundHeight} @ {webrtcStats.outboundFps}fps
                       </span>
+                    </div>
+                    <div className="diag-item">
+                      <span className="diag-label">Bytes Sent:</span>
+                      <span className="diag-value">{(webrtcStats.bytesSent / (1024 * 1024)).toFixed(2)} MB</span>
                     </div>
                   </>
                 ) : (
                   <>
                     <div className="diag-item">
-                      <span className="diag-label">Remote video:</span>
-                      <span className={`diag-value ${remoteVideoTrack ? 'text-ok' : 'text-warn'}`}>
-                        {remoteVideoTrack ? 'YES' : 'NO'}
-                      </span>
+                      <span className="diag-label">Frames Received:</span>
+                      <span className="diag-value">{webrtcStats.framesReceived}</span>
                     </div>
                     <div className="diag-item">
-                      <span className="diag-label">Remote audio:</span>
-                      <span className={`diag-value ${remoteAudioTrack ? 'text-ok' : 'text-muted'}`}>
-                        {remoteAudioTrack ? 'YES' : 'NO'}
-                      </span>
+                      <span className="diag-label">Frames Decoded:</span>
+                      <span className="diag-value">{webrtcStats.framesDecoded}</span>
                     </div>
                     <div className="diag-item">
-                      <span className="diag-label">srcObject:</span>
-                      <span className={`diag-value ${remoteScreenStream ? 'attached' : 'missing'}`}>
-                        {remoteScreenStream ? 'attached' : 'missing'}
-                      </span>
-                    </div>
-                    <div className="diag-item">
-                      <span className="diag-label">Play status:</span>
-                      <span className="diag-value">{partnerPlayStatus}</span>
-                    </div>
-                    <div className="diag-item">
-                      <span className="diag-label">Partner size:</span>
+                      <span className="diag-label">Inbound Res:</span>
                       <span className="diag-value">
-                        {partnerMetrics.videoWidth}x{partnerMetrics.videoHeight}
+                        {webrtcStats.inboundWidth}x{webrtcStats.inboundHeight} @ {webrtcStats.inboundFps}fps
                       </span>
                     </div>
                     <div className="diag-item">
-                      <span className="diag-label">ReadyState:</span>
-                      <span className="diag-value">{partnerMetrics.readyState}</span>
+                      <span className="diag-label">Bytes Received:</span>
+                      <span className="diag-value">{(webrtcStats.bytesReceived / (1024 * 1024)).toFixed(2)} MB</span>
                     </div>
                     <div className="diag-item">
-                      <span className="diag-label">Paused:</span>
-                      <span className="diag-value">{partnerMetrics.paused ? 'YES' : 'NO'}</span>
-                    </div>
-                    <div className="diag-item">
-                      <span className="diag-label">Time:</span>
-                      <span className="diag-value">{partnerMetrics.currentTime.toFixed(1)}s</span>
-                    </div>
-                    <div className="diag-item">
-                      <span className="diag-label">Frame Rendered:</span>
-                      <span className={`diag-value ${hasRenderedFrame ? 'text-ok' : 'text-warn'}`}>
-                        {hasRenderedFrame ? 'YES' : 'NO'}
-                      </span>
+                      <span className="diag-label">Packets Lost:</span>
+                      <span className="diag-value">{webrtcStats.packetsLost}</span>
                     </div>
                   </>
                 )}
+
+                {/* PLAYER METRICS */}
+                <div className="diag-item">
+                  <span className="diag-label">Player Res:</span>
+                  <span className="diag-value">{playerMetrics.videoWidth}x{playerMetrics.videoHeight}</span>
+                </div>
+                <div className="diag-item">
+                  <span className="diag-label">Player State:</span>
+                  <span className="diag-value">Ready:{playerMetrics.readyState} | Paused:{playerMetrics.paused ? 'YES' : 'NO'}</span>
+                </div>
               </div>
             </div>
           )}
@@ -964,3 +504,4 @@ export const ScreenShareView: React.FC<ScreenShareViewProps> = ({
     </div>
   );
 };
+

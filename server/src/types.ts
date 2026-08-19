@@ -8,6 +8,22 @@ export interface MediaSourceState {
   updatedAt?: number;
 }
 
+export type MovieStateAction = 'play' | 'pause' | 'seek' | 'sync' | 'rate' | 'full-sync';
+
+export interface MovieMessagePayload {
+  type: 'movie-source' | 'movie-state' | 'movie-command';
+  url?: string;
+  action?: MovieStateAction;
+  currentTime?: number;
+  playing?: boolean;
+  duration?: number;
+  rate?: number;
+  timestamp?: number;
+  targetPeerId?: string;
+  senderPeerId?: string;
+  roomId?: string;
+}
+
 export type ClientMessage =
   | { type: 'join-room'; roomId: string; peerId: string }
   | { type: 'leave-room'; roomId: string; peerId: string }
@@ -28,6 +44,7 @@ export type ClientMessage =
   | { type: 'media-request-state'; targetPeerId?: string; senderPeerId: string }
   | { type: 'media-request-sync'; targetPeerId?: string; senderPeerId: string }
   | { type: 'media-action'; action: 'play' | 'pause' | 'seek'; currentTime: number; timestamp: number; targetPeerId?: string; senderPeerId: string }
+  | MovieMessagePayload
   | { type: 'ping' };
 
 export type ServerMessage =
@@ -52,6 +69,7 @@ export type ServerMessage =
   | { type: 'media-request-state'; senderPeerId: string }
   | { type: 'media-request-sync'; senderPeerId: string }
   | { type: 'media-action'; action: 'play' | 'pause' | 'seek'; currentTime: number; timestamp: number; senderPeerId: string }
+  | MovieMessagePayload
   | { type: 'error'; message: string }
   | { type: 'pong' };
 

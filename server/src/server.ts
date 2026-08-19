@@ -370,6 +370,16 @@ wss.on('connection', (ws: WebSocket) => {
         return;
       }
 
+      if (msg.type === 'movie-command' || msg.type === 'movie-source' || msg.type === 'movie-state') {
+        console.log(`[SIGNALING] [Room ${mapping.roomId}] MOVIE_COMMAND from ${msg.senderPeerId}`);
+        for (const [id, participant] of room.participants.entries()) {
+          if (id !== msg.senderPeerId) {
+            send(participant.ws, msg);
+          }
+        }
+        return;
+      }
+
       if (msg.type === 'media-request-state') {
         console.log(`[SIGNALING] [Room ${mapping.roomId}] MEDIA_REQUEST_STATE from ${msg.senderPeerId}`);
         for (const [id, participant] of room.participants.entries()) {

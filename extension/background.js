@@ -2,6 +2,7 @@
 
 let activeMovieTabId = null;
 let currentStreamId = null;
+let captureState = 'IDLE';
 
 console.log('[EXT] service worker initialized');
 
@@ -16,12 +17,31 @@ function broadcastToWatchTogetherTabs(message) {
   });
 }
 
+// Monitor tabCapture status changes (Part 19)
+if (chrome.tabCapture && chrome.tabCapture.onStatusChanged) {
+  chrome.tabCapture.onStatusChanged.addListener((info) => {
+    console.log('[EXT tabCapture onStatusChanged]', info.tabId, info.status, info.fullscreen);
+    if (info.status === 'stopped' || info.status === 'error') {
+      captureState = 'IDLE';
+      currentStreamId = null;
+      broadcastToWatchTogetherTabs({
+        type: 'WT_MOVIE_CAPTURE_STOPPED',
+        tabId: info.tabId,
+        reason: info.status,
+      });
+    } else if (info.status === 'active') {
+      captureState = 'STREAMING';
+    }
+  });
+}
+
 // Listen for tab removals
 chrome.tabs.onRemoved.addListener((tabId) => {
   if (tabId === activeMovieTabId) {
     console.log('[EXT] Movie tab closed by user:', tabId);
     activeMovieTabId = null;
     currentStreamId = null;
+    captureState = 'IDLE';
     broadcastToWatchTogetherTabs({
       type: 'WT_MOVIE_CAPTURE_STOPPED',
       reason: 'tab_closed',
@@ -35,7 +55,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   switch (request.type) {
     case 'WT_PING': {
-      sendResponse({ success: true, version: '1.0.0', activeMovieTabId });
+      sendResponse({
+        success: true,
+        version: '1.0.0',
+        activeMovieTabId,
+        captureState,
+        hasActiveStream: !!currentStreamId,
+      });
       return true;
     }
 
@@ -54,11 +80,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         } else {
           activeMovieTabId = tab.id;
           console.log('[EXT] Movie tab opened:', activeMovieTabId, url);
-          sendResponse({ success: true, tabId: tab.id });
+          sendResponse({
+            success: true,
+            tabId: tab.id,
+            title: tab.title || '',
+            url: tab.url || url,
+          });
 
           broadcastToWatchTogetherTabs({
             type: 'WT_MOVIE_TAB_OPENED',
             tabId: tab.id,
+            title: tab.title || '',
             url: url,
           });
         }
@@ -69,6 +101,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     case 'WT_POPUP_CAPTURE_SUCCESS': {
       currentStreamId = request.streamId;
       activeMovieTabId = request.tabId;
+      captureState = 'STREAMING';
       console.log('[EXT] Movie capture stream received from popup for tab:', activeMovieTabId);
 
       broadcastToWatchTogetherTabs({
@@ -86,6 +119,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     case 'WT_STOP_CINEMA': {
       console.log('[EXT] Stop cinema requested');
       currentStreamId = null;
+      captureState = 'IDLE';
 
       broadcastToWatchTogetherTabs({
         type: 'WT_MOVIE_CAPTURE_STOPPED',

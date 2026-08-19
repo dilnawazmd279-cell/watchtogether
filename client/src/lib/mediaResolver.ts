@@ -48,7 +48,8 @@ export function normalizeMediaUrl(input: string): string {
 
 /**
  * Checks whether a URL points to a direct browser-playable media resource.
- * Handles query parameters, hashes, and signed tokens (.mp4, .webm, .ogg, .m4v).
+ * Uses new URL(url).pathname and detects direct playable extensions (.mp4, .webm, .ogg, .m4v).
+ * Handles query parameters and tokens (e.g. flower.mp4?token=123).
  */
 export function isDirectMediaUrl(url: string): boolean {
   if (!url || typeof url !== 'string') return false;
@@ -57,17 +58,14 @@ export function isDirectMediaUrl(url: string): boolean {
     const parsed = new URL(normalized);
     const pathname = parsed.pathname.toLowerCase();
 
-    return (
-      /\.(mp4|webm|ogg|m4v|ogv)($|\?|#)/i.test(pathname) ||
-      /\.(mp4|webm|ogg|m4v)($|\?|#)/i.test(parsed.href)
-    );
+    return /\.(mp4|webm|ogg|m4v)$/i.test(pathname);
   } catch {
     return false;
   }
 }
 
 /**
- * Converts known media platforms to their official embed URLs.
+ * Converts known media platforms to their official embed URLs if applicable.
  */
 export function convertToEmbedUrl(url: string): { embedUrl: string; platform: 'youtube' | 'vimeo' | 'twitch' | 'dailymotion' | 'generic' } {
   try {
@@ -115,7 +113,6 @@ export function convertToEmbedUrl(url: string): { embedUrl: string; platform: 'y
       }
     }
 
-    // 4. Generic Webpage Embedding
     return { embedUrl: url, platform: 'generic' };
   } catch {
     return { embedUrl: url, platform: 'generic' };
@@ -124,11 +121,8 @@ export function convertToEmbedUrl(url: string): { embedUrl: string; platform: 'y
 
 /**
  * Smart URL Router.
- * Step 1: Normalize and validate URL.
- * Step 2: Determine source type:
- *   A. DIRECT MEDIA (.mp4, .webm, .ogg, .m4v, direct video files)
- *   B. EMBEDDABLE WEBPAGE (YouTube, Vimeo, or legitimate embed attempts)
- *   C. BLOCKED WEBPAGE (Graceful fallback when embedding is prohibited)
+ * - DIRECT MEDIA (.mp4, .webm, .ogg, .m4v): Direct video files for Host-Authoritative playback.
+ * - NON-DIRECT WEBPAGE: Flagged as non-direct media so fallback notice is shown.
  */
 export function resolveMovieSource(input: string): ResolvedMovieSource {
   const normalized = normalizeMediaUrl(input);
@@ -146,15 +140,12 @@ export function resolveMovieSource(input: string): ResolvedMovieSource {
     };
   }
 
-  // B. EMBEDDABLE WEBPAGE
-  const { embedUrl, platform } = convertToEmbedUrl(normalized);
+  // B. NON-DIRECT WEBPAGES / SITES
   return {
     url: normalized,
-    embedUrl,
-    sourceType: 'embeddable-page',
+    sourceType: 'blocked-webpage',
     title: parsed.hostname.replace(/^www\./i, ''),
     isControllable: false,
-    platform,
   };
 }
 

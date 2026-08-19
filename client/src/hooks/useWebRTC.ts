@@ -15,13 +15,37 @@ interface UseWebRTCOptions {
   onError?: (error: string) => void;
 }
 
+export interface WebRTCStats {
+  // Outbound (Host)
+  framesEncoded: number;
+  framesSent: number;
+  outboundWidth: number;
+  outboundHeight: number;
+  bytesSent: number;
+  outboundFps: number;
+  // Inbound (Partner)
+  framesReceived: number;
+  framesDecoded: number;
+  inboundWidth: number;
+  inboundHeight: number;
+  bytesReceived: number;
+  inboundFps: number;
+  packetsLost: number;
+}
+
+export interface MovieTabInfo {
+  tabId?: number;
+  title?: string;
+  url?: string;
+}
+
 const ICE_CONFIG: RTCConfiguration = {
   iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
   iceCandidatePoolSize: 2,
 };
 
 export function useWebRTC({ roomId, onRoomFull, onError }: UseWebRTCOptions) {
-  // State
+  // Connection State
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('idle');
   const [peerId] = useState<string>(() => generatePeerId());
   const [partnerPeerId, setPartnerPeerId] = useState<string | null>(null);
@@ -29,12 +53,18 @@ export function useWebRTC({ roomId, onRoomFull, onError }: UseWebRTCOptions) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // WebRTC Live States for Diagnostic Panel
+  // WebRTC Camera Live States
   const [iceState, setIceState] = useState<string>('new');
   const [signalingState, setSignalingState] = useState<string>('stable');
   const [connState, setConnState] = useState<string>('new');
+  const [dataChannelState, setDataChannelState] = useState<'idle' | 'connecting' | 'open' | 'closed'>('idle');
 
-  // Local Media State
+  // WebRTC Dedicated Movie PC Live States
+  const [movieConnState, setMovieConnState] = useState<string>('new');
+  const [movieIceState, setMovieIceState] = useState<string>('new');
+  const [movieSignalingState, setMovieSignalingState] = useState<string>('stable');
+
+  // Local Media State (Camera & Mic)
   const [mediaState, setMediaState] = useState<MediaState>({
     isCameraOn: false,
     isMicOn: false,
@@ -46,44 +76,62 @@ export function useWebRTC({ roomId, onRoomFull, onError }: UseWebRTCOptions) {
   // Remote Media State
   const [remoteHasCamera, setRemoteHasCamera] = useState(false);
   const [remoteHasMic, setRemoteHasMic] = useState(false);
-  const [remoteIsScreenSharing, setRemoteIsScreenSharing] = useState(false);
 
-  // Host Media Source State
+  // Movie Tab & Source State
   const [mediaSource, setMediaSource] = useState<MediaSourceState | null>(null);
+  const [movieTabInfo, setMovieTabInfo] = useState<MovieTabInfo | null>(null);
+  const [isExtensionInstalled, setIsExtensionInstalled] = useState<boolean>(false);
+  const [captureState, setCaptureState] = useState<'IDLE' | 'MOVIE_TAB_OPENED' | 'WAITING_FOR_EXTENSION_INVOCATION' | 'CAPTURE_REQUESTED' | 'STREAMING' | 'ERROR'>('IDLE');
 
   // Streams
   const [localCameraStream, setLocalCameraStream] = useState<MediaStream | null>(null);
-  const [localScreenStream, setLocalScreenStream] = useState<MediaStream | null>(null);
   const [remoteCameraStream, setRemoteCameraStream] = useState<MediaStream | null>(null);
-  const [remoteScreenStream, setRemoteScreenStream] = useState<MediaStream | null>(null);
+  const [localMovieStream, setLocalMovieStream] = useState<MediaStream | null>(null);
+  const [remoteMovieStream, setRemoteMovieStream] = useState<MediaStream | null>(null);
 
-  // WebRTC Connection 1: Camera & Chat Connection
+  // Live Diagnostics Stats
+  const [webrtcStats, setWebrtcStats] = useState<WebRTCStats>({
+    framesEncoded: 0,
+    framesSent: 0,
+    outboundWidth: 0,
+    outboundHeight: 0,
+    bytesSent: 0,
+    outboundFps: 0,
+    framesReceived: 0,
+    framesDecoded: 0,
+    inboundWidth: 0,
+    inboundHeight: 0,
+    bytesReceived: 0,
+    inboundFps: 0,
+    packetsLost: 0,
+  });
+
+  // WebSocket and PeerConnection Refs
   const wsRef = useRef<WebSocket | null>(null);
-  const pcRef = useRef<RTCPeerConnection | null>(null);
+  const pcRef = useRef<RTCPeerConnection | null>(null); // Camera & Chat PC
+  const moviePcRef = useRef<RTCPeerConnection | null>(null); // Dedicated Movie PC
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
-  const iceCandidateQueueRef = useRef<RTCIceCandidateInit[]>([]);
-
-  // WebRTC Connection 2: Dedicated Movie Connection
-  const moviePcRef = useRef<RTCPeerConnection | null>(null);
-  const movieIceCandidateQueueRef = useRef<RTCIceCandidateInit[]>([]);
+  const cameraIceQueueRef = useRef<RTCIceCandidateInit[]>([]);
+  const movieIceQueueRef = useRef<RTCIceCandidateInit[]>([]);
 
   const isInitiatorRef = useRef<boolean>(false);
   const partnerPeerIdRef = useRef<string | null>(null);
-  const remoteIsScreenSharingRef = useRef<boolean>(false);
   const pingIntervalRef = useRef<number | null>(null);
+  const statsIntervalRef = useRef<number | null>(null);
   const mediaPromiseRef = useRef<Promise<MediaStream | null> | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
   const onRoomFullRef = useRef(onRoomFull);
   const onErrorRef = useRef(onError);
 
   // Stream Refs
   const localCameraStreamRef = useRef<MediaStream | null>(null);
-  const localScreenStreamRef = useRef<MediaStream | null>(null);
   const remoteCameraStreamRef = useRef<MediaStream | null>(null);
-  const remoteScreenStreamRef = useRef<MediaStream | null>(null);
+  const localMovieStreamRef = useRef<MediaStream | null>(null);
+  const remoteMovieStreamRef = useRef<MediaStream | null>(null);
 
   const isLeavingRef = useRef<boolean>(false);
 
-  // Keep refs in sync
+  // Sync refs
   useEffect(() => {
     partnerPeerIdRef.current = partnerPeerId;
   }, [partnerPeerId]);
@@ -93,20 +141,16 @@ export function useWebRTC({ roomId, onRoomFull, onError }: UseWebRTCOptions) {
   }, [localCameraStream]);
 
   useEffect(() => {
-    localScreenStreamRef.current = localScreenStream;
-  }, [localScreenStream]);
-
-  useEffect(() => {
     remoteCameraStreamRef.current = remoteCameraStream;
   }, [remoteCameraStream]);
 
   useEffect(() => {
-    remoteScreenStreamRef.current = remoteScreenStream;
-  }, [remoteScreenStream]);
+    localMovieStreamRef.current = localMovieStream;
+  }, [localMovieStream]);
 
   useEffect(() => {
-    remoteIsScreenSharingRef.current = remoteIsScreenSharing;
-  }, [remoteIsScreenSharing]);
+    remoteMovieStreamRef.current = remoteMovieStream;
+  }, [remoteMovieStream]);
 
   useEffect(() => {
     onRoomFullRef.current = onRoomFull;
@@ -116,7 +160,7 @@ export function useWebRTC({ roomId, onRoomFull, onError }: UseWebRTCOptions) {
     onErrorRef.current = onError;
   }, [onError]);
 
-  // Send message over WebSocket
+  // Send message over WebSocket signaling
   const sendSignaling = useCallback((msg: ClientSignalingMessage) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify(msg));
@@ -141,12 +185,363 @@ export function useWebRTC({ roomId, onRoomFull, onError }: UseWebRTCOptions) {
   const addChatMessageRef = useRef(addChatMessage);
   addChatMessageRef.current = addChatMessage;
 
-  // Setup DataChannel listeners on Connection 1
+  // =========================================================================
+  // DEDICATED MOVIE PEER CONNECTION (PART 7 & 17)
+  // =========================================================================
+
+  // Host: Starts Movie Streaming with Captured MediaStream
+  const startMovieStreaming = useCallback(
+    async (stream: MediaStream) => {
+      console.log('[MOVIE PC] Starting dedicated movie streaming...');
+      setLocalMovieStream(stream);
+      localMovieStreamRef.current = stream;
+      setCaptureState('STREAMING');
+      setMediaState((prev) => ({ ...prev, isScreenSharing: true }));
+
+      // Clean up any existing movie PC
+      if (moviePcRef.current) {
+        moviePcRef.current.close();
+        moviePcRef.current = null;
+      }
+
+      const moviePc = new RTCPeerConnection(ICE_CONFIG);
+      moviePcRef.current = moviePc;
+
+      // Track states
+      moviePc.onconnectionstatechange = () => {
+        console.log('[MOVIE PC] connectionState:', moviePc.connectionState);
+        setMovieConnState(moviePc.connectionState);
+      };
+      moviePc.onsignalingstatechange = () => {
+        setMovieSignalingState(moviePc.signalingState);
+      };
+      moviePc.oniceconnectionstatechange = () => {
+        setMovieIceState(moviePc.iceConnectionState);
+        if (moviePc.iceConnectionState === 'failed') {
+          moviePc.restartIce();
+        }
+      };
+
+      // Handle ICE Candidates for Movie PC
+      moviePc.onicecandidate = (event) => {
+        if (event.candidate && partnerPeerIdRef.current) {
+          console.log('[MOVIE PC] Sending movie-ice-candidate to partner');
+          sendSignalingRef.current({
+            type: 'movie-ice-candidate',
+            candidate: event.candidate.toJSON(),
+            targetPeerId: partnerPeerIdRef.current,
+            senderPeerId: peerId,
+          });
+        }
+      };
+
+      // Add Movie Video and Audio Tracks to Movie PC
+      stream.getTracks().forEach((track) => {
+        console.log(`[MOVIE PC] Adding ${track.kind} track to movie PC:`, track.id, track.label);
+        moviePc.addTrack(track, stream);
+      });
+
+      // If Partner is connected, create and send Movie Offer
+      if (partnerPeerIdRef.current) {
+        try {
+          console.log('[MOVIE PC] Creating movie offer for partner:', partnerPeerIdRef.current);
+          const offer = await moviePc.createOffer();
+          await moviePc.setLocalDescription(offer);
+
+          sendSignalingRef.current({
+            type: 'movie-offer',
+            sdp: offer,
+            targetPeerId: partnerPeerIdRef.current,
+            senderPeerId: peerId,
+          });
+
+          sendSignalingRef.current({
+            type: 'screen-share-status',
+            isSharing: true,
+            targetPeerId: partnerPeerIdRef.current,
+            senderPeerId: peerId,
+          });
+        } catch (err) {
+          console.error('[MOVIE PC] Error creating movie offer:', err);
+        }
+      }
+    },
+    [peerId]
+  );
+  const startMovieStreamingRef = useRef(startMovieStreaming);
+  startMovieStreamingRef.current = startMovieStreaming;
+
+  // Stop Movie Streaming (Host or Partner)
+  const stopMovieStreaming = useCallback(() => {
+    console.log('[MOVIE PC] Stopping movie streaming');
+
+    if (localMovieStreamRef.current) {
+      localMovieStreamRef.current.getTracks().forEach((track) => track.stop());
+      localMovieStreamRef.current = null;
+      setLocalMovieStream(null);
+    }
+
+    if (audioContextRef.current) {
+      audioContextRef.current.close().catch(() => {});
+      audioContextRef.current = null;
+    }
+
+    if (moviePcRef.current) {
+      moviePcRef.current.ontrack = null;
+      moviePcRef.current.onicecandidate = null;
+      moviePcRef.current.close();
+      moviePcRef.current = null;
+    }
+
+    setRemoteMovieStream(null);
+    remoteMovieStreamRef.current = null;
+    movieIceQueueRef.current = [];
+    setCaptureState('IDLE');
+    setMediaState((prev) => ({ ...prev, isScreenSharing: false }));
+    setMovieConnState('new');
+    setMovieIceState('new');
+    setMovieSignalingState('stable');
+
+    // Notify partner and extension
+    if (partnerPeerIdRef.current) {
+      sendSignalingRef.current({
+        type: 'screen-share-status',
+        isSharing: false,
+        targetPeerId: partnerPeerIdRef.current,
+        senderPeerId: peerId,
+      });
+    }
+
+    window.postMessage({ type: 'WT_APP_STOP_CINEMA' }, '*');
+  }, [peerId]);
+  const stopMovieStreamingRef = useRef(stopMovieStreaming);
+  stopMovieStreamingRef.current = stopMovieStreaming;
+
+  // Partner: Handles Incoming Movie Offer from Host
+  const handleMovieOffer = useCallback(
+    async (sdp: RTCSessionDescriptionInit, senderPeerId: string) => {
+      console.log('[MOVIE PC] Handling movie offer from host:', senderPeerId);
+
+      if (moviePcRef.current) {
+        moviePcRef.current.close();
+        moviePcRef.current = null;
+      }
+
+      const moviePc = new RTCPeerConnection(ICE_CONFIG);
+      moviePcRef.current = moviePc;
+
+      moviePc.onconnectionstatechange = () => {
+        console.log('[PARTNER MOVIE PC] connectionState:', moviePc.connectionState);
+        setMovieConnState(moviePc.connectionState);
+      };
+      moviePc.onsignalingstatechange = () => {
+        setMovieSignalingState(moviePc.signalingState);
+      };
+      moviePc.oniceconnectionstatechange = () => {
+        setMovieIceState(moviePc.iceConnectionState);
+      };
+
+      moviePc.onicecandidate = (event) => {
+        if (event.candidate) {
+          sendSignalingRef.current({
+            type: 'movie-ice-candidate',
+            candidate: event.candidate.toJSON(),
+            targetPeerId: senderPeerId,
+            senderPeerId: peerId,
+          });
+        }
+      };
+
+      // Receive incoming movie tracks
+      moviePc.ontrack = (event) => {
+        const track = event.track;
+        console.log(`[PARTNER MOVIE ontrack] kind=${track.kind}, id=${track.id}`);
+
+        setRemoteMovieStream((prev) => {
+          const existing = prev ? prev.getTracks().filter((t) => t.id !== track.id) : [];
+          const newStream = new MediaStream([...existing, track]);
+          remoteMovieStreamRef.current = newStream;
+          return newStream;
+        });
+
+        track.onended = () => {
+          console.log('[PARTNER MOVIE] Track ended:', track.kind);
+        };
+      };
+
+      try {
+        await moviePc.setRemoteDescription(new RTCSessionDescription(sdp));
+
+        // Drain any queued ICE candidates for Movie PC
+        while (movieIceQueueRef.current.length > 0) {
+          const cand = movieIceQueueRef.current.shift();
+          if (cand) {
+            await moviePc.addIceCandidate(new RTCIceCandidate(cand));
+          }
+        }
+
+        const answer = await moviePc.createAnswer();
+        await moviePc.setLocalDescription(answer);
+
+        sendSignalingRef.current({
+          type: 'movie-answer',
+          sdp: answer,
+          targetPeerId: senderPeerId,
+          senderPeerId: peerId,
+        });
+
+        setCaptureState('STREAMING');
+        setMediaState((prev) => ({ ...prev, isScreenSharing: true }));
+      } catch (err) {
+        console.error('[MOVIE PC] Error answering movie offer:', err);
+      }
+    },
+    [peerId]
+  );
+  const handleMovieOfferRef = useRef(handleMovieOffer);
+  handleMovieOfferRef.current = handleMovieOffer;
+
+  // Host: Handles Movie Answer from Partner
+  const handleMovieAnswer = useCallback(async (sdp: RTCSessionDescriptionInit) => {
+    if (moviePcRef.current) {
+      try {
+        console.log('[HOST MOVIE PC] Setting remote movie answer');
+        await moviePcRef.current.setRemoteDescription(new RTCSessionDescription(sdp));
+
+        while (movieIceQueueRef.current.length > 0) {
+          const cand = movieIceQueueRef.current.shift();
+          if (cand) {
+            await moviePcRef.current.addIceCandidate(new RTCIceCandidate(cand));
+          }
+        }
+      } catch (err) {
+        console.error('[HOST MOVIE PC] Error setting remote movie answer:', err);
+      }
+    }
+  }, []);
+  const handleMovieAnswerRef = useRef(handleMovieAnswer);
+  handleMovieAnswerRef.current = handleMovieAnswer;
+
+  // =========================================================================
+  // EXTENSION BRIDGE: LISTEN FOR MESSAGES FROM EXTENSION CONTENT SCRIPT
+  // =========================================================================
+  useEffect(() => {
+    const handleExtensionMessage = async (event: MessageEvent) => {
+      if (event.source !== window || !event.data || typeof event.data !== 'object') return;
+
+      const msg = event.data;
+
+      if (msg.type === 'WT_EXTENSION_READY' || msg.type === 'WT_PONG') {
+        console.log('[EXTENSION BRIDGE] Extension detected, version:', msg.version);
+        setIsExtensionInstalled(true);
+      }
+
+      if (msg.type === 'WT_MOVIE_TAB_OPENED') {
+        console.log('[EXTENSION BRIDGE] Movie tab opened:', msg.tabId, msg.url);
+        setMovieTabInfo({
+          tabId: msg.tabId,
+          title: msg.title || 'Movie Tab',
+          url: msg.url,
+        });
+        setCaptureState('WAITING_FOR_EXTENSION_INVOCATION');
+      }
+
+      if (msg.type === 'WT_STREAM_ID_READY' && isHost) {
+        const streamId = msg.streamId;
+        console.log('[EXTENSION BRIDGE] WT_STREAM_ID_READY received! streamId =', streamId);
+
+        setMovieTabInfo({
+          tabId: msg.tabId,
+          title: msg.tabTitle,
+          url: msg.tabUrl,
+        });
+
+        try {
+          // Request tab capture MediaStream using chromeMediaSourceId
+          console.log('[HOST] Calling getUserMedia with chromeMediaSourceId...');
+          const stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              mandatory: {
+                chromeMediaSource: 'tab',
+                chromeMediaSourceId: streamId,
+              },
+            },
+            video: {
+              mandatory: {
+                chromeMediaSource: 'tab',
+                chromeMediaSourceId: streamId,
+              },
+            },
+          } as any);
+
+          const videoTrack = stream.getVideoTracks()[0];
+          const audioTrack = stream.getAudioTracks()[0];
+
+          console.log('[EXT MOVIE]');
+          console.log('tabId:', msg.tabId);
+          console.log('tabUrl:', msg.tabUrl);
+          console.log('tabTitle:', msg.tabTitle);
+          console.log('videoTrack readyState:', videoTrack?.readyState);
+          console.log('audioTrack readyState:', audioTrack?.readyState);
+
+          if (videoTrack) {
+            const settings = videoTrack.getSettings();
+            console.log('[EXT MOVIE] width:', settings.width, 'height:', settings.height, 'frameRate:', settings.frameRate);
+          }
+
+          // Part 5: Restore Local Audio for Host using AudioContext
+          if (audioTrack) {
+            try {
+              const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+              const source = audioCtx.createMediaStreamSource(stream);
+              source.connect(audioCtx.destination);
+              audioContextRef.current = audioCtx;
+              console.log('[EXT MOVIE] Local audio restored via AudioContext');
+            } catch (audioErr) {
+              console.warn('[EXT MOVIE] AudioContext routing warning:', audioErr);
+            }
+          }
+
+          // Start dedicated movie streaming
+          await startMovieStreamingRef.current(stream);
+        } catch (err: any) {
+          console.error('[HOST] getUserMedia tab capture error:', err);
+          reportErrorRef.current('Could not capture movie tab: ' + (err?.message || 'Unknown error'));
+          setCaptureState('ERROR');
+        }
+      }
+
+      if (msg.type === 'WT_MOVIE_CAPTURE_STOPPED') {
+        console.log('[EXTENSION BRIDGE] Movie capture stopped:', msg.reason);
+        stopMovieStreamingRef.current();
+      }
+    };
+
+    window.addEventListener('message', handleExtensionMessage);
+
+    // Ping extension on mount
+    window.postMessage({ type: 'WT_APP_PING' }, '*');
+
+    return () => {
+      window.removeEventListener('message', handleExtensionMessage);
+    };
+  }, [isHost]);
+
+  // Host: Open Movie in Extension Tab
+  const openMovieTab = useCallback((url: string) => {
+    console.log('[HOST] Requesting extension to open movie tab:', url);
+    setCaptureState('CAPTURE_REQUESTED');
+    window.postMessage({ type: 'WT_APP_OPEN_MOVIE_TAB', url }, '*');
+  }, []);
+
+  // Setup DataChannel listeners on Camera PC
   const setupDataChannel = useCallback((dc: RTCDataChannel) => {
     dataChannelRef.current = dc;
+    setDataChannelState(dc.readyState as any);
 
     dc.onopen = () => {
       console.log('[CHAT] DataChannel open');
+      setDataChannelState('open');
     };
 
     dc.onmessage = (event) => {
@@ -160,20 +555,19 @@ export function useWebRTC({ roomId, onRoomFull, onError }: UseWebRTCOptions) {
             text: data.text,
             timestamp: data.timestamp || Date.now(),
           });
-        } else if (data.type === 'movie-control') {
-          console.log('[MOVIE CONTROL] Received action:', data.action, 'time:', data.currentTime);
         }
       } catch (e) {
-        console.error('[CHAT] Error parsing DataChannel message:', e);
+        console.error('[DATACHANNEL] Error parsing message:', e);
       }
     };
 
     dc.onerror = (err) => {
-      console.error('[CHAT] DataChannel error:', err);
+      console.error('[DATACHANNEL] DataChannel error:', err);
     };
 
     dc.onclose = () => {
-      console.log('[CHAT] DataChannel closed');
+      console.log('[DATACHANNEL] DataChannel closed');
+      setDataChannelState('closed');
     };
   }, []);
 
@@ -249,15 +643,15 @@ export function useWebRTC({ roomId, onRoomFull, onError }: UseWebRTCOptions) {
   initLocalMediaRef.current = initLocalMedia;
 
   // =========================================================================
-  // CONNECTION 1: CAMERA & CHAT PEER CONNECTION
+  // CAMERA & CHAT PEER CONNECTION
   // =========================================================================
-  const createPeerConnection = useCallback(
+  const createCameraPeerConnection = useCallback(
     (targetId: string) => {
       if (pcRef.current) {
         return pcRef.current;
       }
 
-      console.log('[WEBRTC] createPeerConnection for target:', targetId);
+      console.log('[WEBRTC] createCameraPeerConnection for target:', targetId);
 
       const pc = new RTCPeerConnection(ICE_CONFIG);
       pcRef.current = pc;
@@ -273,17 +667,17 @@ export function useWebRTC({ roomId, onRoomFull, onError }: UseWebRTCOptions) {
       // If initiator, create reliable & ordered DataChannel
       if (isInitiatorRef.current) {
         try {
-          console.log('[CHAT] DataChannel created ("chat", ordered: true)');
+          console.log('[DATACHANNEL] Creating DataChannel ("chat", ordered: true)');
           const dc = pc.createDataChannel('chat', { ordered: true });
           setupDataChannel(dc);
         } catch (err) {
-          console.error('[CHAT] Error creating DataChannel:', err);
+          console.error('[DATACHANNEL] Error creating DataChannel:', err);
         }
       }
 
       // Receiver handles ondatachannel
       pc.ondatachannel = (event) => {
-        console.log('[CHAT] DataChannel received from peer');
+        console.log('[DATACHANNEL] DataChannel received from peer');
         setupDataChannel(event.channel);
       };
 
@@ -303,7 +697,6 @@ export function useWebRTC({ roomId, onRoomFull, onError }: UseWebRTCOptions) {
       // Handle remote tracks on Camera PC (Camera and Microphone ONLY)
       pc.ontrack = (event) => {
         const track = event.track;
-
         console.log(`[CAMERA PC ontrack] kind=${track.kind}, id=${track.id}`);
 
         if (track.kind === 'video') {
@@ -364,8 +757,8 @@ export function useWebRTC({ roomId, onRoomFull, onError }: UseWebRTCOptions) {
     },
     [peerId, setupDataChannel]
   );
-  const createPeerConnectionRef = useRef(createPeerConnection);
-  createPeerConnectionRef.current = createPeerConnection;
+  const createCameraPeerConnectionRef = useRef(createCameraPeerConnection);
+  createCameraPeerConnectionRef.current = createCameraPeerConnection;
 
   // Clean up RTCPeerConnections
   const cleanupPeerConnections = useCallback(() => {
@@ -376,217 +769,90 @@ export function useWebRTC({ roomId, onRoomFull, onError }: UseWebRTCOptions) {
       pcRef.current.close();
       pcRef.current = null;
     }
-    if (moviePcRef.current) {
-      console.log('[WEBRTC] Cleaning up Movie RTCPeerConnection');
-      moviePcRef.current.ontrack = null;
-      moviePcRef.current.onicecandidate = null;
-      moviePcRef.current.close();
-      moviePcRef.current = null;
-    }
     if (dataChannelRef.current) {
       dataChannelRef.current.close();
       dataChannelRef.current = null;
     }
+    stopMovieStreamingRef.current();
+    setDataChannelState('idle');
     setRemoteCameraStream(null);
-    setRemoteScreenStream(null);
     remoteCameraStreamRef.current = null;
-    remoteScreenStreamRef.current = null;
     setRemoteHasCamera(false);
     setRemoteHasMic(false);
-    setRemoteIsScreenSharing(false);
-    remoteIsScreenSharingRef.current = false;
-    iceCandidateQueueRef.current = [];
-    movieIceCandidateQueueRef.current = [];
+    cameraIceQueueRef.current = [];
+    movieIceQueueRef.current = [];
   }, []);
   const cleanupPeerConnectionsRef = useRef(cleanupPeerConnections);
   cleanupPeerConnectionsRef.current = cleanupPeerConnections;
 
-  // =========================================================================
-  // CONNECTION 2: DEDICATED MOVIE PEER CONNECTION LIFECYCLE
-  // =========================================================================
-  const startStreamingMedia = useCallback(
-    async (stream: MediaStream) => {
-      const videoTracks = stream.getVideoTracks();
-      const audioTracks = stream.getAudioTracks();
+  // Periodic WebRTC Outbound/Inbound Diagnostics (Part 8 & 14)
+  useEffect(() => {
+    statsIntervalRef.current = window.setInterval(async () => {
+      const pc = moviePcRef.current;
+      if (!pc) return;
 
-      console.log('[HOST MOVIE]');
-      console.log('captureStream created');
-      console.log('[HOST MOVIE]');
-      console.log('video tracks:', videoTracks.length);
-      console.log('[HOST MOVIE]');
-      console.log('audio tracks:', audioTracks.length);
+      try {
+        const stats = await pc.getStats();
+        let framesEncoded = 0;
+        let framesSent = 0;
+        let outboundWidth = 0;
+        let outboundHeight = 0;
+        let bytesSent = 0;
+        let outboundFps = 0;
+        let framesReceived = 0;
+        let framesDecoded = 0;
+        let inboundWidth = 0;
+        let inboundHeight = 0;
+        let bytesReceived = 0;
+        let inboundFps = 0;
+        let packetsLost = 0;
 
-      setLocalScreenStream(stream);
-      localScreenStreamRef.current = stream;
-      setMediaState((prev) => ({ ...prev, isScreenSharing: true }));
-
-      // Clean up previous movie connection if one existed
-      if (moviePcRef.current) {
-        moviePcRef.current.close();
-        moviePcRef.current = null;
-      }
-
-      // Create DEDICATED movie RTCPeerConnection
-      const moviePc = new RTCPeerConnection(ICE_CONFIG);
-      moviePcRef.current = moviePc;
-
-      // Add movie tracks & log senders
-      videoTracks.forEach((track) => {
-        const sender = moviePc.addTrack(track, stream);
-        console.log('[HOST MOVIE PC]');
-        console.log('video sender track:', sender.track?.id || track.id);
-      });
-
-      audioTracks.forEach((track) => {
-        const sender = moviePc.addTrack(track, stream);
-        console.log('[HOST MOVIE PC]');
-        console.log('audio sender track:', sender.track?.id || track.id);
-      });
-
-      // Handle ICE candidates for Movie PC
-      moviePc.onicecandidate = (event) => {
-        if (event.candidate && partnerPeerIdRef.current) {
-          sendSignalingRef.current({
-            type: 'movie-ice-candidate',
-            candidate: event.candidate.toJSON(),
-            targetPeerId: partnerPeerIdRef.current,
-            senderPeerId: peerId,
-          });
-        }
-      };
-
-      moviePc.onconnectionstatechange = () => {
-        console.log('[HOST MOVIE PC]');
-        console.log('movie PC connection:', moviePc.connectionState);
-        console.log('iceConnectionState:', moviePc.iceConnectionState);
-        console.log('signalingState:', moviePc.signalingState);
-      };
-
-      moviePc.oniceconnectionstatechange = () => {
-        console.log('[HOST MOVIE PC] iceConnectionState:', moviePc.iceConnectionState);
-      };
-
-      // Create movie offer and send to Partner
-      if (partnerPeerIdRef.current) {
-        try {
-          console.log('[HOST WEBRTC] movie renegotiation started');
-          const offer = await moviePc.createOffer();
-          await moviePc.setLocalDescription(offer);
-          console.log('[HOST WEBRTC] offer sent');
-
-          sendSignalingRef.current({
-            type: 'movie-offer',
-            sdp: offer,
-            targetPeerId: partnerPeerIdRef.current,
-            senderPeerId: peerId,
-          });
-        } catch (err) {
-          console.error('[HOST MOVIE PC] Error creating movie offer:', err);
-        }
-      }
-
-      // Step 1: Host WebRTC stats polling every ~2s
-      const hostStatsInterval = window.setInterval(async () => {
-        if (moviePc.connectionState === 'closed') {
-          clearInterval(hostStatsInterval);
-          return;
-        }
-        try {
-          const stats = await moviePc.getStats();
-          stats.forEach((report: any) => {
-            if (report.type === 'outbound-rtp' && report.kind === 'video') {
-              console.log('[HOST STATS]');
-              console.log('bytesSent:', report.bytesSent);
-              console.log('packetsSent:', report.packetsSent);
-              console.log('framesEncoded:', report.framesEncoded);
-              console.log('framesSent:', report.framesSent);
-              console.log('frameWidth:', report.frameWidth);
-              console.log('frameHeight:', report.frameHeight);
-              console.log('framesPerSecond:', report.framesPerSecond);
-              console.log('timestamp:', report.timestamp);
-            }
-          });
-
-          const vTrack = stream.getVideoTracks()[0];
-          if (vTrack) {
-            console.log('[HOST MOVIE TRACK]');
-            console.log('readyState:', vTrack.readyState);
-            console.log('enabled:', vTrack.enabled);
-            console.log('muted:', vTrack.muted);
+        stats.forEach((report) => {
+          if (report.type === 'outbound-rtp' && report.kind === 'video') {
+            framesEncoded = report.framesEncoded || 0;
+            framesSent = report.framesSent || 0;
+            bytesSent = report.bytesSent || 0;
+            outboundFps = report.framesPerSecond || 0;
+            outboundWidth = report.frameWidth || 0;
+            outboundHeight = report.frameHeight || 0;
           }
-        } catch {
-          // ignore closed connection stats error
-        }
-      }, 2000);
-    },
-    [peerId]
-  );
-  const startStreamingMediaRef = useRef(startStreamingMedia);
-  startStreamingMediaRef.current = startStreamingMedia;
+          if (report.type === 'inbound-rtp' && report.kind === 'video') {
+            framesReceived = report.framesReceived || 0;
+            framesDecoded = report.framesDecoded || 0;
+            bytesReceived = report.bytesReceived || 0;
+            inboundFps = report.framesPerSecond || 0;
+            inboundWidth = report.frameWidth || 0;
+            inboundHeight = report.frameHeight || 0;
+            packetsLost = report.packetsLost || 0;
+          }
+        });
 
-  // Stop Streaming Movie Media
-  const stopStreamingMedia = useCallback(async () => {
-    console.log('[CINEMA] Stopping movie stream transmission...');
-    if (localScreenStreamRef.current) {
-      localScreenStreamRef.current.getTracks().forEach((track) => track.stop());
-      setLocalScreenStream(null);
-      localScreenStreamRef.current = null;
-    }
-
-    setMediaState((prev) => ({ ...prev, isScreenSharing: false }));
-
-    if (moviePcRef.current) {
-      moviePcRef.current.close();
-      moviePcRef.current = null;
-    }
-
-    if (partnerPeerIdRef.current) {
-      sendSignalingRef.current({
-        type: 'screen-share-status',
-        isSharing: false,
-        targetPeerId: partnerPeerIdRef.current,
-        senderPeerId: peerId,
-      });
-    }
-  }, [peerId]);
-
-  // Start Screen Sharing (Fallback for webpage tabs)
-  const startScreenShare = useCallback(async () => {
-    try {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
-        reportErrorRef.current('Screen sharing is not supported by your browser.');
-        return;
+        setWebrtcStats({
+          framesEncoded,
+          framesSent,
+          outboundWidth,
+          outboundHeight,
+          bytesSent,
+          outboundFps,
+          framesReceived,
+          framesDecoded,
+          inboundWidth,
+          inboundHeight,
+          bytesReceived,
+          inboundFps,
+          packetsLost,
+        });
+      } catch {
+        // Ignore stats polling errors
       }
+    }, 1000);
 
-      console.log('[ScreenShare] Requesting browser display media...');
-      const screenStream = await navigator.mediaDevices.getDisplayMedia({
-        video: {
-          displaySurface: 'browser',
-          cursor: 'always',
-        } as MediaTrackConstraints,
-        audio: true,
-      });
-
-      console.log('[ScreenShare] Display media acquired');
-      await startStreamingMedia(screenStream);
-    } catch (err: any) {
-      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-        console.log('[ScreenShare] User cancelled screen share selection.');
-      } else {
-        console.error('[ScreenShare] Error:', err);
-        reportErrorRef.current('Screen sharing failed: ' + (err.message || 'Unknown error'));
+    return () => {
+      if (statsIntervalRef.current) {
+        clearInterval(statsIntervalRef.current);
       }
-    }
-  }, [startStreamingMedia]);
-
-  // Toggle Screen Sharing
-  const toggleScreenShare = useCallback(() => {
-    if (mediaState.isScreenSharing) {
-      stopStreamingMedia();
-    } else {
-      startScreenShare();
-    }
-  }, [mediaState.isScreenSharing, startScreenShare, stopStreamingMedia]);
+    };
+  }, []);
 
   // Toggle Camera
   const toggleCamera = useCallback(async () => {
@@ -675,12 +941,6 @@ export function useWebRTC({ roomId, onRoomFull, onError }: UseWebRTCOptions) {
       setLocalCameraStream(null);
     }
 
-    if (localScreenStreamRef.current) {
-      localScreenStreamRef.current.getTracks().forEach((t) => t.stop());
-      localScreenStreamRef.current = null;
-      setLocalScreenStream(null);
-    }
-
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       sendSignalingRef.current({
         type: 'leave-room',
@@ -701,6 +961,7 @@ export function useWebRTC({ roomId, onRoomFull, onError }: UseWebRTCOptions) {
     setPartnerPeerId(null);
     partnerPeerIdRef.current = null;
     setMediaSource(null);
+    setMovieTabInfo(null);
     setMessages([]);
     setErrorMessage(null);
     setMediaState({
@@ -785,12 +1046,12 @@ export function useWebRTC({ roomId, onRoomFull, onError }: UseWebRTCOptions) {
             addChatMessageRef.current({
               id: 'sys-partner-joined-' + Date.now(),
               sender: 'system',
-              text: 'Partner joined! Connecting audio, video, and cinema stream...',
+              text: 'Partner joined! Connecting camera, audio, and cinema...',
               timestamp: Date.now(),
             });
 
             await initLocalMediaRef.current();
-            const pc = createPeerConnectionRef.current(msg.peerId);
+            const pc = createCameraPeerConnectionRef.current(msg.peerId);
 
             try {
               const offer = await pc.createOffer();
@@ -802,13 +1063,13 @@ export function useWebRTC({ roomId, onRoomFull, onError }: UseWebRTCOptions) {
                 senderPeerId: peerId,
               });
             } catch (offerErr) {
-              console.error('[WEBRTC] Error creating/sending camera offer:', offerErr);
+              console.error('[WEBRTC] Error creating camera offer:', offerErr);
             }
 
-            // If Host already has an active movie stream, send movie offer immediately to partner
-            if (localScreenStreamRef.current && localScreenStreamRef.current.getTracks().length > 0) {
-              console.log('[HOST WEBRTC] Partner joined while movie is active. Sending movie offer...');
-              startStreamingMediaRef.current(localScreenStreamRef.current);
+            // Part 18: If Host is already streaming movie, automatically establish movie connection for new partner
+            if (localMovieStreamRef.current && localMovieStreamRef.current.getTracks().length > 0) {
+              console.log('[HOST] Re-establishing movie stream for new partner');
+              startMovieStreamingRef.current(localMovieStreamRef.current);
             }
             break;
           }
@@ -817,7 +1078,22 @@ export function useWebRTC({ roomId, onRoomFull, onError }: UseWebRTCOptions) {
             setPartnerPeerId(null);
             partnerPeerIdRef.current = null;
             setConnectionStatus('partner-disconnected');
-            cleanupPeerConnectionsRef.current();
+
+            if (pcRef.current) {
+              pcRef.current.close();
+              pcRef.current = null;
+            }
+            if (moviePcRef.current) {
+              moviePcRef.current.close();
+              moviePcRef.current = null;
+            }
+            setRemoteCameraStream(null);
+            remoteCameraStreamRef.current = null;
+            setRemoteMovieStream(null);
+            remoteMovieStreamRef.current = null;
+            setRemoteHasCamera(false);
+            setRemoteHasMic(false);
+
             addChatMessageRef.current({
               id: 'sys-partner-left-' + Date.now(),
               sender: 'system',
@@ -834,22 +1110,19 @@ export function useWebRTC({ roomId, onRoomFull, onError }: UseWebRTCOptions) {
             break;
           }
 
-          // -----------------------------------------------------------------
-          // CONNECTION 1 SIGNALING: CAMERA & CHAT
-          // -----------------------------------------------------------------
           case 'offer': {
             setPartnerPeerId(msg.senderPeerId);
             partnerPeerIdRef.current = msg.senderPeerId;
             setConnectionStatus('connecting-peer');
 
             await initLocalMediaRef.current();
-            const pc = createPeerConnectionRef.current(msg.senderPeerId);
+            const pc = createCameraPeerConnectionRef.current(msg.senderPeerId);
 
             try {
               await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
 
-              while (iceCandidateQueueRef.current.length > 0) {
-                const cand = iceCandidateQueueRef.current.shift();
+              while (cameraIceQueueRef.current.length > 0) {
+                const cand = cameraIceQueueRef.current.shift();
                 if (cand) {
                   await pc.addIceCandidate(new RTCIceCandidate(cand));
                 }
@@ -875,8 +1148,8 @@ export function useWebRTC({ roomId, onRoomFull, onError }: UseWebRTCOptions) {
               try {
                 await pcRef.current.setRemoteDescription(new RTCSessionDescription(msg.sdp));
 
-                while (iceCandidateQueueRef.current.length > 0) {
-                  const cand = iceCandidateQueueRef.current.shift();
+                while (cameraIceQueueRef.current.length > 0) {
+                  const cand = cameraIceQueueRef.current.shift();
                   if (cand) {
                     await pcRef.current.addIceCandidate(new RTCIceCandidate(cand));
                   }
@@ -897,146 +1170,22 @@ export function useWebRTC({ roomId, onRoomFull, onError }: UseWebRTCOptions) {
                   console.error('[ICE] Error adding camera candidate:', err);
                 }
               } else {
-                iceCandidateQueueRef.current.push(msg.candidate);
+                cameraIceQueueRef.current.push(msg.candidate);
               }
             }
             break;
           }
 
-          // -----------------------------------------------------------------
-          // CONNECTION 2 SIGNALING: DEDICATED MOVIE PEER CONNECTION
-          // -----------------------------------------------------------------
+          // Dedicated Movie WebRTC Message Handlers
           case 'movie-offer': {
-            console.log('[PARTNER WEBRTC] movie offer received');
-
-            if (moviePcRef.current) {
-              moviePcRef.current.close();
-              moviePcRef.current = null;
-            }
-
-            const moviePc = new RTCPeerConnection(ICE_CONFIG);
-            moviePcRef.current = moviePc;
-
-            // Dedicated remote movie stream
-            const remoteMovieStream = new MediaStream();
-
-            moviePc.onconnectionstatechange = () => {
-              console.log('[PARTNER MOVIE PC] connectionState:', moviePc.connectionState);
-              console.log('[PARTNER MOVIE PC] iceConnectionState:', moviePc.iceConnectionState);
-              console.log('[PARTNER MOVIE PC] signalingState:', moviePc.signalingState);
-            };
-
-            moviePc.oniceconnectionstatechange = () => {
-              console.log('[PARTNER MOVIE PC] iceConnectionState:', moviePc.iceConnectionState);
-            };
-
-            moviePc.ontrack = (event) => {
-              console.log('[PARTNER MOVIE] TRACK RECEIVED', event.track.kind, event.track.id);
-
-              if (event.track.kind === 'video') {
-                console.log('[PARTNER MOVIE] video track received: YES');
-              } else if (event.track.kind === 'audio') {
-                console.log('[PARTNER MOVIE] audio track received: YES');
-              }
-
-              // Step 5: Do NOT wait for event.streams[0] - add event.track directly
-              const existingTracks = remoteMovieStream.getTracks();
-              if (!existingTracks.some((t) => t.id === event.track.id)) {
-                remoteMovieStream.addTrack(event.track);
-              }
-
-              console.log(
-                `[PARTNER MOVIE] remoteMovieStream tracks: video=${remoteMovieStream.getVideoTracks().length} audio=${remoteMovieStream.getAudioTracks().length}`
-              );
-
-              // Update React state with a new MediaStream instance so reference change triggers React re-render
-              const newStreamRef = new MediaStream(remoteMovieStream.getTracks());
-              remoteScreenStreamRef.current = newStreamRef;
-              setRemoteScreenStream(newStreamRef);
-              setRemoteIsScreenSharing(true);
-              remoteIsScreenSharingRef.current = true;
-            };
-
-            moviePc.onicecandidate = (event) => {
-              if (event.candidate) {
-                sendSignalingRef.current({
-                  type: 'movie-ice-candidate',
-                  candidate: event.candidate.toJSON(),
-                  targetPeerId: msg.senderPeerId,
-                  senderPeerId: peerId,
-                });
-              }
-            };
-
-            try {
-              await moviePc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
-
-              while (movieIceCandidateQueueRef.current.length > 0) {
-                const cand = movieIceCandidateQueueRef.current.shift();
-                if (cand) {
-                  await moviePc.addIceCandidate(new RTCIceCandidate(cand));
-                }
-              }
-
-              const answer = await moviePc.createAnswer();
-              await moviePc.setLocalDescription(answer);
-
-              console.log('[PARTNER WEBRTC] answer sent');
-              sendSignalingRef.current({
-                type: 'movie-answer',
-                sdp: answer,
-                targetPeerId: msg.senderPeerId,
-                senderPeerId: peerId,
-              });
-
-              // Step 2: Partner WebRTC stats polling every ~2s
-              const partnerStatsInterval = window.setInterval(async () => {
-                if (moviePc.connectionState === 'closed') {
-                  clearInterval(partnerStatsInterval);
-                  return;
-                }
-                try {
-                  const stats = await moviePc.getStats();
-                  stats.forEach((report: any) => {
-                    if (report.type === 'inbound-rtp' && report.kind === 'video') {
-                      console.log('[PARTNER STATS]');
-                      console.log('bytesReceived:', report.bytesReceived);
-                      console.log('packetsReceived:', report.packetsReceived);
-                      console.log('framesDecoded:', report.framesDecoded);
-                      console.log('framesReceived:', report.framesReceived);
-                      console.log('frameWidth:', report.frameWidth);
-                      console.log('frameHeight:', report.frameHeight);
-                      console.log('framesPerSecond:', report.framesPerSecond);
-                      console.log('jitter:', report.jitter);
-                      console.log('packetsLost:', report.packetsLost);
-                    }
-                  });
-                } catch {
-                  // ignore closed connection stats error
-                }
-              }, 2000);
-            } catch (err) {
-              console.error('[PARTNER MOVIE PC] Error creating movie answer:', err);
-            }
+            console.log('[WEBRTC] Received movie-offer from:', msg.senderPeerId);
+            handleMovieOfferRef.current(msg.sdp, msg.senderPeerId);
             break;
           }
 
           case 'movie-answer': {
-            console.log('[HOST WEBRTC] answer received');
-            if (moviePcRef.current) {
-              try {
-                await moviePcRef.current.setRemoteDescription(new RTCSessionDescription(msg.sdp));
-
-                while (movieIceCandidateQueueRef.current.length > 0) {
-                  const cand = movieIceCandidateQueueRef.current.shift();
-                  if (cand) {
-                    await moviePcRef.current.addIceCandidate(new RTCIceCandidate(cand));
-                  }
-                }
-              } catch (err) {
-                console.error('[HOST MOVIE PC] Error setting remote movie answer:', err);
-              }
-            }
+            console.log('[WEBRTC] Received movie-answer from:', msg.senderPeerId);
+            handleMovieAnswerRef.current(msg.sdp);
             break;
           }
 
@@ -1046,25 +1195,25 @@ export function useWebRTC({ roomId, onRoomFull, onError }: UseWebRTCOptions) {
                 try {
                   await moviePcRef.current.addIceCandidate(new RTCIceCandidate(msg.candidate));
                 } catch (err) {
-                  console.error('[MOVIE ICE] Error adding movie candidate:', err);
+                  console.error('[ICE] Error adding movie candidate:', err);
                 }
               } else {
-                movieIceCandidateQueueRef.current.push(msg.candidate);
+                movieIceQueueRef.current.push(msg.candidate);
               }
             }
             break;
           }
 
           case 'screen-share-status': {
-            setRemoteIsScreenSharing(msg.isSharing);
-            remoteIsScreenSharingRef.current = msg.isSharing;
+            console.log('[WEBRTC] screen-share-status:', msg.isSharing);
+            setMediaState((prev) => ({ ...prev, isScreenSharing: msg.isSharing }));
             if (!msg.isSharing) {
               if (moviePcRef.current) {
                 moviePcRef.current.close();
                 moviePcRef.current = null;
               }
-              setRemoteScreenStream(null);
-              remoteScreenStreamRef.current = null;
+              setRemoteMovieStream(null);
+              remoteMovieStreamRef.current = null;
             }
             break;
           }
@@ -1117,37 +1266,6 @@ export function useWebRTC({ roomId, onRoomFull, onError }: UseWebRTCOptions) {
     };
   }, [roomId, peerId]);
 
-  const sendMovieControl = useCallback((action: 'play' | 'pause' | 'seek', currentTime: number) => {
-    const payload = {
-      type: 'movie-control',
-      action,
-      currentTime,
-      timestamp: Date.now(),
-    };
-
-    if (dataChannelRef.current && dataChannelRef.current.readyState === 'open') {
-      try {
-        dataChannelRef.current.send(JSON.stringify(payload));
-      } catch (err) {
-        console.warn('[MOVIE CONTROL] DataChannel send error:', err);
-      }
-    }
-
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && partnerPeerIdRef.current) {
-      try {
-        wsRef.current.send(JSON.stringify({
-          type: 'signal',
-          roomId,
-          senderPeerId: peerId,
-          targetPeerId: partnerPeerIdRef.current,
-          data: payload,
-        }));
-      } catch (err) {
-        console.warn('[MOVIE CONTROL] WebSocket signal error:', err);
-      }
-    }
-  }, [roomId, peerId]);
-
   return {
     connectionStatus,
     peerId,
@@ -1156,27 +1274,31 @@ export function useWebRTC({ roomId, onRoomFull, onError }: UseWebRTCOptions) {
     iceState,
     signalingState,
     connState,
+    movieConnState,
+    movieIceState,
+    movieSignalingState,
+    dataChannelState,
     messages,
     errorMessage,
     mediaState,
     remoteHasCamera,
     remoteHasMic,
-    remoteIsScreenSharing,
     localCameraStream,
-    localScreenStream,
     remoteCameraStream,
-    remoteScreenStream,
+    localMovieStream,
+    remoteMovieStream,
     mediaSource,
     setMediaSource,
-    startStreamingMedia,
-    stopStreamingMedia,
+    movieTabInfo,
+    isExtensionInstalled,
+    captureState,
+    webrtcStats,
+    openMovieTab,
+    startMovieStreaming,
+    stopMovieStreaming,
     toggleCamera,
     toggleMic,
-    toggleScreenShare,
-    startScreenShare,
-    stopScreenShare: stopStreamingMedia,
     sendMessage,
-    sendMovieControl,
     leaveRoom,
     clearError: () => setErrorMessage(null),
   };

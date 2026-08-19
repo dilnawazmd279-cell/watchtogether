@@ -24,23 +24,27 @@ export const App: React.FC = () => {
     connState,
     iceState,
     signalingState,
+    movieConnState,
+    movieIceState,
+    movieSignalingState,
+    dataChannelState: _dataChannelState,
     mediaState,
     remoteHasCamera,
     remoteHasMic,
     localCameraStream,
-    localScreenStream,
     remoteCameraStream,
-    remoteScreenStream,
+    localMovieStream,
+    remoteMovieStream,
     mediaSource,
-    setMediaSource,
-    startStreamingMedia,
-    stopStreamingMedia,
+    movieTabInfo,
+    isExtensionInstalled,
+    captureState,
+    webrtcStats,
+    openMovieTab,
+    stopMovieStreaming,
     toggleCamera,
     toggleMic,
-    toggleScreenShare,
-    startScreenShare,
     sendMessage,
-    sendMovieControl,
     leaveRoom: hookLeaveRoom,
     clearError,
   } = useWebRTC({
@@ -56,7 +60,7 @@ export const App: React.FC = () => {
       } else {
         console.log('[PARTNER] room mounted');
         console.log('[PARTNER] WebRTC initialized');
-        console.log('[PARTNER] waiting for remote movie');
+        console.log('[PARTNER] waiting for Host movie');
       }
     }
   }, [activeRoomId, isHost]);
@@ -68,12 +72,6 @@ export const App: React.FC = () => {
       }
     }
   }, [activeRoomId, localCameraStream, isHost]);
-
-  useEffect(() => {
-    if (activeRoomId && !isHost && remoteScreenStream) {
-      console.log('[PARTNER] remote movie track received');
-    }
-  }, [activeRoomId, isHost, remoteScreenStream]);
 
   const handleJoinRoom = (roomId: string) => {
     const cleanId = roomId.trim().toLowerCase();
@@ -129,19 +127,22 @@ export const App: React.FC = () => {
         <main className="movie-column" role="region" aria-label="Cinema Stage">
           <ScreenShareView
             isHost={isHost}
-            remoteScreenStream={remoteScreenStream}
-            localScreenStream={localScreenStream}
-            localIsScreenSharing={mediaState.isScreenSharing}
+            localMovieStream={localMovieStream}
+            remoteMovieStream={remoteMovieStream}
             mediaSource={mediaSource}
-            onSetMediaSource={setMediaSource}
-            onStartStreaming={startStreamingMedia}
-            onStopStreaming={stopStreamingMedia}
-            onStartShare={startScreenShare}
-            onSendMovieControl={sendMovieControl}
+            movieTabInfo={movieTabInfo}
+            isExtensionInstalled={isExtensionInstalled}
+            captureState={captureState}
+            webrtcStats={webrtcStats}
+            onOpenMovieTab={openMovieTab}
+            onStopCinema={stopMovieStreaming}
             partnerConnected={partnerConnected}
             connState={connState}
             iceState={iceState}
             signalingState={signalingState}
+            movieConnState={movieConnState}
+            movieIceState={movieIceState}
+            movieSignalingState={movieSignalingState}
           />
         </main>
 
@@ -188,7 +189,7 @@ export const App: React.FC = () => {
           mediaState={mediaState}
           onToggleCamera={toggleCamera}
           onToggleMic={toggleMic}
-          onToggleScreenShare={toggleScreenShare}
+          onToggleScreenShare={stopMovieStreaming}
           onLeaveRoom={handleLeaveRoom}
         />
       </footer>
