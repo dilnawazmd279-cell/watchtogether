@@ -27,12 +27,19 @@ export function getIceServers(): RTCIceServer[] {
 }
 
 export function getSignalingServerUrl(): string {
-  if (import.meta.env.VITE_SIGNALING_SERVER_URL) {
-    return import.meta.env.VITE_SIGNALING_SERVER_URL;
+  const configured = import.meta.env.VITE_SIGNALING_SERVER_URL?.trim();
+
+  if (configured) {
+    return configured.replace(/\/+$/, '');
+  }
+
+  if (import.meta.env.PROD) {
+    return 'wss://watchtogether-h611.onrender.com';
   }
 
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const hostname = window.location.hostname || 'localhost';
+
   return `${protocol}//${hostname}:3001`;
 }
 

@@ -981,6 +981,8 @@ export function useWebRTC({ roomId, onRoomFull, onError }: UseWebRTCOptions) {
     setConnectionStatus('connecting-server');
     const signalingUrl = getSignalingServerUrl();
 
+    console.log('[SIGNALING] connecting to:', getSignalingServerUrl());
+
     let ws: WebSocket;
     try {
       ws = new WebSocket(signalingUrl);
@@ -998,6 +1000,7 @@ export function useWebRTC({ roomId, onRoomFull, onError }: UseWebRTCOptions) {
     }, 15000);
 
     ws.onopen = () => {
+      console.log('[SIGNALING] connected');
       ws.send(JSON.stringify({ type: 'join-room', roomId, peerId }));
     };
 
@@ -1239,15 +1242,16 @@ export function useWebRTC({ roomId, onRoomFull, onError }: UseWebRTCOptions) {
       }
     };
 
-    ws.onerror = (err) => {
-      console.error('[SIGNALING] WebSocket error:', err);
+    ws.onerror = () => {
+      console.error('[SIGNALING] connection error');
       if (!isLeavingRef.current) {
         setConnectionStatus('error');
         reportErrorRef.current('Signaling server connection error. Ensure backend is running on port 3001.');
       }
     };
 
-    ws.onclose = () => {
+    ws.onclose = (event) => {
+      console.log('[SIGNALING] closed', event.code, event.reason);
       if (!isLeavingRef.current && connectionStatus !== 'room-full') {
         setConnectionStatus('error');
       }
