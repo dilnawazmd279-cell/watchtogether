@@ -58,8 +58,18 @@ chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     return;
   }
 
-  // Check if this tab is the WatchTogether app itself
-  if (url.includes('localhost:5173') || url.includes('127.0.0.1:5173')) {
+const WATCH_TOGETHER_URL_PATTERNS = [
+  'http://localhost:5173/*',
+  'http://127.0.0.1:5173/*',
+  'https://qualitytimestogether.netlify.app/*',
+];
+
+// Check if this tab is the WatchTogether app itself
+  if (
+    url.includes('localhost:5173') ||
+    url.includes('127.0.0.1:5173') ||
+    url.includes('qualitytimestogether.netlify.app')
+  ) {
     tabTitleEl.textContent = 'WatchTogether App Tab';
     startBtn.disabled = true;
     setStatus('ready', 'Select Movie Tab');
@@ -109,7 +119,7 @@ startBtn.addEventListener('click', async () => {
   }
 
   // Query WatchTogether App tab for consumer authorization
-  chrome.tabs.query({ url: ['http://localhost:5173/*', 'http://127.0.0.1:5173/*'] }, (wtTabs) => {
+  chrome.tabs.query({ url: WATCH_TOGETHER_URL_PATTERNS }, (wtTabs) => {
     const consumerTabId = wtTabs && wtTabs.length > 0 ? wtTabs[0].id : undefined;
     const captureOptions = consumerTabId
       ? { targetTabId: currentTab.id, consumerTabId }

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "WatchTogether Cinema Companion",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Companion extension for WatchTogether: Capture browser movie tabs in real time with high quality and synchronized audio.",
   "permissions": [
     "tabCapture",
@@ -13,6 +13,7 @@
   "host_permissions": [
     "http://localhost:5173/*",
     "http://127.0.0.1:5173/*",
+    "https://qualitytimestogether.netlify.app/*",
     "<all_urls>"
   ],
   "background": {
@@ -22,7 +23,8 @@
     {
       "matches": [
         "http://localhost:5173/*",
-        "http://127.0.0.1:5173/*"
+        "http://127.0.0.1:5173/*",
+        "https://qualitytimestogether.netlify.app/*"
       ],
       "js": ["content.js"],
       "run_at": "document_start"

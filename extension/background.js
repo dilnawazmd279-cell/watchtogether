@@ -6,9 +6,15 @@ let captureState = 'IDLE';
 
 console.log('[EXT] service worker initialized');
 
+const WATCH_TOGETHER_URL_PATTERNS = [
+  'http://localhost:5173/*',
+  'http://127.0.0.1:5173/*',
+  'https://qualitytimestogether.netlify.app/*',
+];
+
 // Notify all WatchTogether tabs of an event
 function broadcastToWatchTogetherTabs(message) {
-  chrome.tabs.query({ url: ['http://localhost:5173/*', 'http://127.0.0.1:5173/*'] }, (tabs) => {
+  chrome.tabs.query({ url: WATCH_TOGETHER_URL_PATTERNS }, (tabs) => {
     tabs.forEach((tab) => {
       if (tab.id) {
         chrome.tabs.sendMessage(tab.id, message).catch(() => {});
@@ -57,7 +63,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     case 'WT_PING': {
       sendResponse({
         success: true,
-        version: '1.0.0',
+        version: '1.0.1',
         activeMovieTabId,
         captureState,
         hasActiveStream: !!currentStreamId,
