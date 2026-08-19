@@ -38,34 +38,8 @@ const server = http.createServer((req, res) => {
   res.end('Not Found');
 });
 
-const wss = new WebSocketServer({ noServer: true });
-
-server.on('upgrade', (request, socket, head) => {
-  try {
-    const url = new URL(
-      request.url || '/',
-      `http://${request.headers.host || 'localhost'}`
-    );
-
-    if (url.pathname !== '/ws') {
-      console.log(`[SIGNALING] rejected WebSocket path: ${url.pathname}`);
-      socket.write(
-        'HTTP/1.1 404 Not Found\r\n' +
-        'Connection: close\r\n' +
-        '\r\n'
-      );
-      socket.destroy();
-      return;
-    }
-
-    wss.handleUpgrade(request, socket, head, (ws) => {
-      console.log('[SIGNALING] WebSocket connection accepted on /ws');
-      wss.emit('connection', ws, request);
-    });
-  } catch (error) {
-    console.error('[SIGNALING] upgrade error:', error);
-    socket.destroy();
-  }
+const wss = new WebSocketServer({
+  server,
 });
 
 // Production Heartbeat Keepalive (every 30 seconds)
@@ -125,6 +99,7 @@ function handleLeave(ws: WebSocket) {
 }
 
 wss.on('connection', (ws: WebSocket) => {
+  console.log('[SIGNALING] WebSocket connected');
   const extWs = ws as ExtWebSocket;
   extWs.isAlive = true;
 
@@ -495,6 +470,7 @@ wss.on('connection', (ws: WebSocket) => {
   });
 
   ws.on('close', () => {
+    console.log('[SIGNALING] WebSocket disconnected');
     handleLeave(ws);
   });
 
@@ -505,10 +481,7 @@ wss.on('connection', (ws: WebSocket) => {
 });
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log('[RENDER] HTTP server listening on:');
-  console.log(`0.0.0.0:${PORT}`);
-  console.log('[RENDER] WebSocket endpoint:');
-  console.log(`ws://0.0.0.0:${PORT}/ws`);
-  console.log(`WatchTogether Signaling Server listening on port ${PORT}`);
-  console.log(`WebSocket endpoint: /ws`);
+  console.log(
+    `[RENDER] HTTP/WebSocket server listening on 0.0.0.0:${PORT}`
+  );
 });
