@@ -30,17 +30,18 @@ export function getSignalingServerUrl(): string {
   const configured = import.meta.env.VITE_SIGNALING_SERVER_URL?.trim();
 
   if (configured) {
-    return configured.replace(/\/+$/, '');
+    const clean = configured.replace(/\/+$/, '');
+    return clean.endsWith('/ws') ? clean : `${clean}/ws`;
   }
 
   if (import.meta.env.PROD) {
-    return 'wss://watchtogether-h611.onrender.com';
+    return 'wss://watchtogether-h611.onrender.com/ws';
   }
 
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const hostname = window.location.hostname || 'localhost';
 
-  return `${protocol}//${hostname}:3001`;
+  return `${protocol}//${hostname}:3001/ws`;
 }
 
 export function generateRoomId(): string {

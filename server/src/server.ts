@@ -2,6 +2,10 @@ import http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { ClientMessage, ServerMessage, Room, Participant } from './types.js';
 
+interface ExtWebSocket extends WebSocket {
+  isAlive: boolean;
+}
+
 const PORT = parseInt(process.env.PORT || '3001', 10);
 const rooms = new Map<string, Room>();
 const socketToRoomPeer = new Map<WebSocket, { roomId: string; peerId: string }>();
@@ -34,7 +38,38 @@ const server = http.createServer((req, res) => {
   res.end('Not Found');
 });
 
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({ noServer: true });
+
+server.on('upgrade', (req, socket, head) => {
+  const pathname = req.url ? new URL(req.url, `http://${req.headers.host || 'localhost'}`).pathname : '';
+
+  if (pathname === '/ws') {
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      console.log('[SIGNALING] WebSocket connection accepted on /ws');
+      wss.emit('connection', ws, req);
+    });
+  } else {
+    console.log(`[SIGNALING] rejected WebSocket path: ${pathname}`);
+    socket.write('HTTP/1.1 400 Bad Request\r\n\r\n');
+    socket.destroy();
+  }
+});
+
+// Production Heartbeat Keepalive (every 30 seconds)
+const heartbeatInterval = setInterval(() => {
+  wss.clients.forEach((ws) => {
+    const extWs = ws as ExtWebSocket;
+    if (extWs.isAlive === false) {
+      return ws.terminate();
+    }
+    extWs.isAlive = false;
+    ws.ping();
+  });
+}, 30000);
+
+wss.on('close', () => {
+  clearInterval(heartbeatInterval);
+});
 
 function send(ws: WebSocket, message: ServerMessage) {
   if (ws.readyState === WebSocket.OPEN) {
@@ -77,7 +112,12 @@ function handleLeave(ws: WebSocket) {
 }
 
 wss.on('connection', (ws: WebSocket) => {
-  console.log('[SIGNALING] New WebSocket client connected');
+  const extWs = ws as ExtWebSocket;
+  extWs.isAlive = true;
+
+  ws.on('pong', () => {
+    extWs.isAlive = true;
+  });
 
   ws.on('message', (rawData: string) => {
     try {
@@ -451,6 +491,9 @@ wss.on('connection', (ws: WebSocket) => {
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`🚀 WatchTogether Signaling Server running on http/ws://localhost:${PORT}`);
+server.listen(PORT, '0.0.0.0', () => {
+  console.log('[RENDER] HTTP server listening on:');
+  console.log(`0.0.0.0:${PORT}`);
+  console.log('[RENDER] WebSocket endpoint:');
+  console.log(`ws://0.0.0.0:${PORT}/ws`);
 });

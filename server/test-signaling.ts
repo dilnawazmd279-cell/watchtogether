@@ -1,6 +1,6 @@
 import { WebSocket } from 'ws';
 
-const WS_URL = 'ws://localhost:3001';
+const WS_URL = 'ws://localhost:3001/ws';
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));

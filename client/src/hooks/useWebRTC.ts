@@ -1251,7 +1251,7 @@ export function useWebRTC({ roomId, onRoomFull, onError }: UseWebRTCOptions) {
     };
 
     ws.onclose = (event) => {
-      console.log('[SIGNALING] closed', event.code, event.reason);
+      console.log('[SIGNALING] closed', event.code);
       if (!isLeavingRef.current && connectionStatus !== 'room-full') {
         setConnectionStatus('error');
       }
