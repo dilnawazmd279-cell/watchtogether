@@ -30,7 +30,7 @@ if (typeof window !== 'undefined') {
       console.log('[EXT] extension installed');
       extensionStatus = {
         isInstalled: true,
-        version: msg.version || '1.0.1',
+        version: msg.version || '1.0.2',
         activeMovieTabId: msg.activeMovieTabId,
       };
       notifyStatusListeners();

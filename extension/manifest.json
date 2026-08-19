@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "WatchTogether Cinema Companion",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Companion extension for WatchTogether: Capture browser movie tabs in real time with high quality and synchronized audio.",
   "permissions": [
     "tabCapture",

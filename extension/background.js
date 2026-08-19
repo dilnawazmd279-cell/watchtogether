@@ -63,7 +63,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     case 'WT_PING': {
       sendResponse({
         success: true,
-        version: '1.0.1',
+        version: '1.0.2',
         activeMovieTabId,
         captureState,
         hasActiveStream: !!currentStreamId,

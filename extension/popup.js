@@ -90,6 +90,46 @@ const WATCH_TOGETHER_URL_PATTERNS = [
   });
 });
 
+function getMediaStreamId(options) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      console.error('[EXT] tabCapture timed out');
+      reject(new Error('Chrome tab capture timed out.'));
+    }, 10000);
+
+    chrome.tabCapture.getMediaStreamId(
+      options,
+      (streamId) => {
+        clearTimeout(timer);
+
+        if (settled) return;
+        settled = true;
+
+        if (chrome.runtime.lastError) {
+          reject(
+            new Error(
+              chrome.runtime.lastError.message ||
+              'Failed to capture tab.'
+            )
+          );
+          return;
+        }
+
+        if (!streamId) {
+          reject(new Error('Chrome returned no stream ID.'));
+          return;
+        }
+
+        resolve(streamId);
+      }
+    );
+  });
+}
+
 // 2. Click [ START CINEMA ]
 startBtn.addEventListener('click', async () => {
   if (!currentTab || !currentTab.id) return;
@@ -98,75 +138,95 @@ startBtn.addEventListener('click', async () => {
   startBtn.disabled = true;
   startBtn.textContent = 'Starting...';
 
-  console.log('[EXT] activeTab invocation = true');
-  console.log('[EXT] requesting tab capture for tab id:', currentTab.id);
+  console.log('[EXT] START CINEMA clicked');
+  console.log('[EXT] target tab:', currentTab.id, currentTab.url);
 
-  // Part 16: Duplicate capture protection
-  if (chrome.tabCapture && typeof chrome.tabCapture.getCapturedTabs === 'function') {
-    try {
-      const capturedTabs = await chrome.tabCapture.getCapturedTabs();
-      const alreadyCaptured = capturedTabs.some((c) => c.tabId === currentTab.id && c.status === 'active');
-      if (alreadyCaptured) {
-        console.log('[EXT] Tab is already captured, reusing state');
-        setStatus('streaming', 'Streaming');
-        startBtn.style.display = 'none';
-        stopBtn.style.display = 'flex';
-        return;
-      }
-    } catch (e) {
-      console.warn('[EXT] getCapturedTabs check warning:', e);
-    }
-  }
+  try {
+    // 1. Get the WatchTogether consumer tab
+    const wtTabs = await chrome.tabs.query({
+      url: WATCH_TOGETHER_URL_PATTERNS,
+    });
 
-  // Query WatchTogether App tab for consumer authorization
-  chrome.tabs.query({ url: WATCH_TOGETHER_URL_PATTERNS }, (wtTabs) => {
-    const consumerTabId = wtTabs && wtTabs.length > 0 ? wtTabs[0].id : undefined;
-    const captureOptions = consumerTabId
-      ? { targetTabId: currentTab.id, consumerTabId }
-      : { targetTabId: currentTab.id };
+    const consumerTabId = wtTabs?.find(
+      (tab) => tab.id && tab.id !== currentTab.id
+    )?.id;
 
-    try {
-      chrome.tabCapture.getMediaStreamId(captureOptions, (streamId) => {
-        if (chrome.runtime.lastError || !streamId) {
-          const errName = chrome.runtime.lastError?.name || 'TabCaptureError';
-          const errMsg = chrome.runtime.lastError?.message || 'Failed to capture tab';
-          console.error('[EXT] getMediaStreamId error.name =', errName);
-          console.error('[EXT] getMediaStreamId error.message =', errMsg);
+    console.log('[EXT] consumer tab:', consumerTabId);
 
-          startBtn.disabled = false;
-          startBtn.textContent = 'START CINEMA';
-          setStatus('error', 'Error');
-          showError('Capture failed: ' + errMsg);
-          return;
-        }
-
-        console.log('[EXT] getMediaStreamId = success, streamId =', streamId);
-        console.log('[EXT] movie capture started');
-
-        // Forward stream ID to background service worker and WatchTogether tabs
-        chrome.runtime.sendMessage(
-          {
-            type: 'WT_POPUP_CAPTURE_SUCCESS',
-            streamId,
-            tabId: currentTab.id,
-            tabTitle: currentTab.title,
-            tabUrl: currentTab.url,
-          },
-          () => {
-            setStatus('streaming', 'Streaming');
-            startBtn.style.display = 'none';
-            stopBtn.style.display = 'flex';
-          }
-        );
-      });
-    } catch (err) {
-      console.error('[EXT] capture exception:', err);
+    if (!consumerTabId) {
+      showError('WatchTogether room tab not found. Keep the WatchTogether room open.');
       startBtn.disabled = false;
       startBtn.textContent = 'START CINEMA';
-      setStatus('error', 'Error');
-      showError('Error starting tab capture: ' + (err?.message || 'Unknown error'));
+      return;
     }
-  });
+
+    // 2. Ensure the movie tab is active before tabCapture is requested
+    await chrome.tabs.update(currentTab.id, {
+      active: true,
+    });
+    await new Promise((r) => setTimeout(r, 150));
+
+    // 3. Duplicate capture protection
+    if (chrome.tabCapture && typeof chrome.tabCapture.getCapturedTabs === 'function') {
+      try {
+        const capturedTabs = await chrome.tabCapture.getCapturedTabs();
+        const alreadyCaptured = capturedTabs.some((c) => c.tabId === currentTab.id && c.status === 'active');
+        if (alreadyCaptured) {
+          console.log('[EXT] Tab is already captured, reusing state');
+          setStatus('streaming', 'Streaming');
+          startBtn.style.display = 'none';
+          stopBtn.style.display = 'flex';
+          return;
+        }
+      } catch (e) {
+        console.warn('[EXT] getCapturedTabs check warning:', e);
+      }
+    }
+
+    // 4. Capture strategy
+    let streamId;
+    try {
+      console.log('[EXT] capture strategy A: targetTabId only');
+      streamId = await getMediaStreamId({
+        targetTabId: currentTab.id,
+      });
+      console.log('[EXT] capture strategy A success');
+    } catch (firstError) {
+      console.warn('[EXT] strategy A failed:', firstError);
+
+      if (!consumerTabId) {
+        throw firstError;
+      }
+
+      console.log('[EXT] capture strategy B: targetTabId + consumerTabId');
+      streamId = await getMediaStreamId({
+        targetTabId: currentTab.id,
+        consumerTabId,
+      });
+      console.log('[EXT] capture strategy B success');
+    }
+
+    console.log('[EXT] streamId received');
+
+    // 5. Send capture success to background
+    chrome.runtime.sendMessage({
+      type: 'WT_POPUP_CAPTURE_SUCCESS',
+      streamId,
+      tabId: currentTab.id,
+      tabTitle: currentTab.title,
+      tabUrl: currentTab.url,
+    });
+
+    setStatus('streaming', 'Streaming');
+    startBtn.style.display = 'none';
+    stopBtn.style.display = 'flex';
+  } catch (error) {
+    console.error('[EXT] Capture error:', error);
+    startBtn.disabled = false;
+    startBtn.textContent = 'START CINEMA';
+    setStatus('error', 'Error');
+    showError(error.message || 'Failed to capture movie tab.');
+  }
 });
 
 // 3. Click [ STOP CINEMA ]

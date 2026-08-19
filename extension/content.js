@@ -3,7 +3,7 @@
 console.log('[EXT content] Active on WatchTogether web app');
 
 // Announce extension presence to the Web App
-window.postMessage({ type: 'WT_EXTENSION_READY', version: '1.0.1' }, '*');
+window.postMessage({ type: 'WT_EXTENSION_READY', version: '1.0.2' }, '*');
 
 // Listen for messages from the Web Application
 window.addEventListener('message', (event) => {
@@ -18,7 +18,7 @@ window.addEventListener('message', (event) => {
         window.postMessage({
           type: 'WT_PONG',
           installed: true,
-          version: response?.version || '1.0.1',
+          version: response?.version || '1.0.2',
           activeMovieTabId: response?.activeMovieTabId,
         }, '*');
       });
