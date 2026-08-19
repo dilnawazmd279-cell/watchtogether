@@ -40,17 +40,30 @@ const server = http.createServer((req, res) => {
 
 const wss = new WebSocketServer({ noServer: true });
 
-server.on('upgrade', (req, socket, head) => {
-  const pathname = req.url ? new URL(req.url, `http://${req.headers.host || 'localhost'}`).pathname : '';
+server.on('upgrade', (request, socket, head) => {
+  try {
+    const url = new URL(
+      request.url || '/',
+      `http://${request.headers.host || 'localhost'}`
+    );
 
-  if (pathname === '/ws') {
-    wss.handleUpgrade(req, socket, head, (ws) => {
+    if (url.pathname !== '/ws') {
+      console.log(`[SIGNALING] rejected WebSocket path: ${url.pathname}`);
+      socket.write(
+        'HTTP/1.1 404 Not Found\r\n' +
+        'Connection: close\r\n' +
+        '\r\n'
+      );
+      socket.destroy();
+      return;
+    }
+
+    wss.handleUpgrade(request, socket, head, (ws) => {
       console.log('[SIGNALING] WebSocket connection accepted on /ws');
-      wss.emit('connection', ws, req);
+      wss.emit('connection', ws, request);
     });
-  } else {
-    console.log(`[SIGNALING] rejected WebSocket path: ${pathname}`);
-    socket.write('HTTP/1.1 400 Bad Request\r\n\r\n');
+  } catch (error) {
+    console.error('[SIGNALING] upgrade error:', error);
     socket.destroy();
   }
 });
@@ -496,4 +509,6 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`0.0.0.0:${PORT}`);
   console.log('[RENDER] WebSocket endpoint:');
   console.log(`ws://0.0.0.0:${PORT}/ws`);
+  console.log(`WatchTogether Signaling Server listening on port ${PORT}`);
+  console.log(`WebSocket endpoint: /ws`);
 });
